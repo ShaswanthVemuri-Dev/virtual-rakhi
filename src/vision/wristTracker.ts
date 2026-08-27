@@ -1,0 +1,88 @@
+import type { HandLandmarker, PoseLandmarker } from '@mediapipe/tasks-vision';
+import type { Vec3, WristAnchor } from '../types/vision';
+import { clamp, distance, normalize } from './math';
+import { LandmarkSmoother, OneEuroFilter, RateMeter } from './smoothing';
+import { createHandLandmarker, createPoseLandmarker } from './modelFactory';
+
+const RIGHT_ELBOW = 14;
+const RIGHT_WRIST = 16;
+const INDEX_MCP = 5;
+const MIDDLE_MCP = 9;
+const PINKY_MCP = 17;
+const sub = (a: Vec3, b: Vec3): Vec3 => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z });
+const cross = (a: Vec3, b: Vec3): Vec3 => ({ x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x });
+const unit3 = (v: Vec3): Vec3 => { const length = Math.hypot(v.x, v.y, v.z) || 1; return { x: v.x / length, y: v.y / length, z: v.z / length }; };
+
+/** Fuses right-forearm pose with right-hand world landmarks for wrist roll and size. */
+export class WristTracker {
+  private pose: PoseLandmarker | null = null;
+  private hand: HandLandmarker | null = null;
+  private lastInference = -Infinity;
+  private readonly intervalMs = 1000 / 18;
+  private readonly smoother = new LandmarkSmoother();
+  private readonly xFilter = new OneEuroFilter(1.5, 0.05);
+  private readonly yFilter = new OneEuroFilter(1.5, 0.05);
+  private readonly scaleFilter = new OneEuroFilter(1.0, 0.035);
+  private readonly angleFilter = new OneEuroFilter(1.1, 0.035);
+  private readonly widthFilter = new OneEuroFilter(1.0, 0.04);
+  private readonly facingFilter = new OneEuroFilter(1.0, 0.035);
+  readonly rate = new RateMeter();
+
+  async init() {
+    if (!this.pose || !this.hand) [this.pose, this.hand] = await Promise.all([createPoseLandmarker(), createHandLandmarker(1)]);
+  }
+
+  async process(video: HTMLVideoElement, now: number): Promise<{ anchor: WristAnchor | null; landmarks: Vec3[] } | null> {
+    if (!this.pose || !this.hand || now - this.lastInference < this.intervalMs || video.readyState < 2) return null;
+    this.lastInference = now;
+    const poseResult = this.pose.detectForVideo(video, now);
+    const handResult = this.hand.detectForVideo(video, now);
+    this.rate.tick(now);
+    const raw = poseResult.landmarks?.[0];
+    if (!raw?.length) return { anchor: null, landmarks: [] };
+    const landmarks = this.smoother.smooth('pose', raw.map((p) => ({ x: p.x, y: p.y, z: p.z })), now);
+    const wrist = landmarks[RIGHT_WRIST];
+    const elbow = landmarks[RIGHT_ELBOW];
+    const rawWrist = raw[RIGHT_WRIST] as (typeof raw)[number] & { presence?: number };
+    const rawElbow = raw[RIGHT_ELBOW] as (typeof raw)[number] & { presence?: number };
+    if (!wrist || !elbow || !rawWrist || !rawElbow) return { anchor: null, landmarks };
+
+    const foundRight = handResult.handednesses?.findIndex((h) => h[0]?.categoryName === 'Right') ?? -1;
+    const handIndex = foundRight >= 0 ? foundRight : 0;
+    const imageHand = handResult.landmarks?.[handIndex];
+    const worldHand = handResult.worldLandmarks?.[handIndex];
+    const handScore = handResult.handednesses?.[handIndex]?.[0]?.score ?? 0;
+    const forearmLength = distance(wrist, elbow);
+    const direction = normalize({ x: wrist.x - elbow.x, y: wrist.y - elbow.y });
+    const angle = Math.atan2(direction.y, direction.x) + Math.PI / 2;
+    const poseConfidence = Math.min(rawWrist.visibility ?? 0.75, rawElbow.visibility ?? 0.75);
+    let wristWidth = clamp(forearmLength * 0.4, 0.035, 0.11);
+    let palmNormal: Vec3 = { x: 0, y: 0, z: 1 };
+    let handDirection: Vec3 = { x: direction.x, y: direction.y, z: 0 };
+    let dorsalFacing = 0.7;
+    if (imageHand?.[INDEX_MCP] && imageHand?.[PINKY_MCP]) wristWidth = clamp(distance(imageHand[INDEX_MCP], imageHand[PINKY_MCP]) * 0.76, 0.03, 0.14);
+    if (worldHand?.[0] && worldHand?.[INDEX_MCP] && worldHand?.[PINKY_MCP] && worldHand?.[MIDDLE_MCP]) {
+      const side = sub(worldHand[PINKY_MCP], worldHand[INDEX_MCP]);
+      const forward = sub(worldHand[MIDDLE_MCP], worldHand[0]);
+      palmNormal = unit3(cross(side, forward));
+      handDirection = unit3(forward);
+      // MediaPipe z becomes smaller toward the camera. For a physical right hand,
+      // the cross product is negative when the knuckle/back side faces the lens.
+      dorsalFacing = clamp(0.5 - palmNormal.z * 2.2, 0, 1);
+    }
+    const confidence = clamp(poseConfidence * 0.54 + handScore * 0.34 + clamp(forearmLength / 0.16, 0, 1) * 0.12, 0, 1);
+    return { landmarks, anchor: {
+      x: this.xFilter.filter(imageHand?.[0]?.x ?? wrist.x, now),
+      y: this.yFilter.filter(imageHand?.[0]?.y ?? wrist.y, now),
+      scale: this.scaleFilter.filter(clamp(Math.max(forearmLength * 0.86, wristWidth * 2.1), 0.08, 0.3), now),
+      angle: this.angleFilter.filter(angle, now), confidence, forearmDirection: direction,
+      wristWidth: this.widthFilter.filter(wristWidth, now), palmNormal, handDirection,
+      dorsalFacing: this.facingFilter.filter(dorsalFacing, now),
+    } };
+  }
+
+  close() {
+    this.pose?.close(); this.hand?.close(); this.pose = null; this.hand = null;
+    this.smoother.clear(); this.rate.reset();
+  }
+}
