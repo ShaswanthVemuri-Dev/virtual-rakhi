@@ -19,11 +19,11 @@ export class Rakhi3DRenderer {
     this.renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.08;
+    // Keep the authored GLB colours neutral: no cinematic colour grading.
+    this.renderer.toneMapping = THREE.NoToneMapping;
     this.camera.position.z = 10;
-    this.scene.add(new THREE.HemisphereLight(0xfff4df, 0x5a3028, 2.4));
-    const key = new THREE.DirectionalLight(0xffffff, 3.2);
+    this.scene.add(new THREE.AmbientLight(0xffffff, 2.15));
+    const key = new THREE.DirectionalLight(0xffffff, 1.1);
     key.position.set(-2, -3, 6);
     this.scene.add(key, this.attached, this.carried);
     this.buildWristWrap();
@@ -44,7 +44,8 @@ export class Rakhi3DRenderer {
     occluder.rotation.z = Math.PI / 2;
     occluder.scale.set(1, 1, .34);
     occluder.renderOrder = 1;
-    this.ornament.position.set(0, -.44, .23);
+    // Local +Y points from the wrist toward the elbow.
+    this.ornament.position.set(0, .44, .23);
     this.ornament.renderOrder = 4;
     this.attached.add(occluder, ring, accent, this.ornament);
   }
@@ -96,7 +97,9 @@ export class Rakhi3DRenderer {
     this.attached.position.set(x, y, 0);
     this.attached.rotation.set((1 - facing) * Math.PI, 0, angle);
     this.attached.scale.setScalar(wristPx * .5);
-    this.ornament.visible = facing > .12;
+    // The supplied ornament is visible only on the back/knuckle side. Turning
+    // the wrist away reveals only the wrapped thread.
+    this.ornament.visible = facing > .58;
     this.ornament.scale.setScalar(.78 + facing * .22);
   }
 

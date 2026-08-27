@@ -48,7 +48,10 @@ export class WristTracker {
     if (!wrist || !elbow || !rawWrist || !rawElbow) return { anchor: null, landmarks };
 
     const foundRight = handResult.handednesses?.findIndex((h) => h[0]?.categoryName === 'Right') ?? -1;
-    const handIndex = foundRight >= 0 ? foundRight : 0;
+    // A Rakhi may attach only to the receiver's right hand. Never substitute
+    // the left hand when the right-hand classifier is uncertain or absent.
+    if (foundRight < 0) return { anchor: null, landmarks };
+    const handIndex = foundRight;
     const imageHand = handResult.landmarks?.[handIndex];
     const worldHand = handResult.worldLandmarks?.[handIndex];
     const handScore = handResult.handednesses?.[handIndex]?.[0]?.score ?? 0;
@@ -60,7 +63,7 @@ export class WristTracker {
     let palmNormal: Vec3 = { x: 0, y: 0, z: 1 };
     let handDirection: Vec3 = { x: direction.x, y: direction.y, z: 0 };
     let dorsalFacing = 0.7;
-    if (imageHand?.[INDEX_MCP] && imageHand?.[PINKY_MCP]) wristWidth = clamp(distance(imageHand[INDEX_MCP], imageHand[PINKY_MCP]) * 0.76, 0.03, 0.14);
+    if (imageHand?.[INDEX_MCP] && imageHand?.[PINKY_MCP]) wristWidth = clamp(distance(imageHand[INDEX_MCP], imageHand[PINKY_MCP]) * 0.68, 0.03, 0.14);
     if (worldHand?.[0] && worldHand?.[INDEX_MCP] && worldHand?.[PINKY_MCP] && worldHand?.[MIDDLE_MCP]) {
       const side = sub(worldHand[PINKY_MCP], worldHand[INDEX_MCP]);
       const forward = sub(worldHand[MIDDLE_MCP], worldHand[0]);

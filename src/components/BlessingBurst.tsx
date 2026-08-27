@@ -7,10 +7,10 @@ const rand = (seed: number) => {
   return x - Math.floor(x);
 };
 
-export default function BlessingBurst({ burstId }: { burstId: number }) {
+export default function BlessingBurst({ burstId, split = false }: { burstId: number; split?: boolean }) {
   if (!burstId) return null;
   return (
-    <div className="blessing-layer" key={burstId} aria-hidden="true">
+    <div className={`blessing-layer ${split ? 'split-blessing' : ''}`} key={burstId} aria-hidden="true">
       {Array.from({ length: 38 }, (_, index) => {
         const style = {
           '--x': `${3 + rand(burstId * 100 + index) * 94}%`,

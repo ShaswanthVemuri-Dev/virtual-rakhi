@@ -2,7 +2,7 @@ import type { FaceAnchor, NormalizedHand, WristAnchor } from '../types/vision';
 import type { CeremonyRole } from '../app/ceremonyState';
 import type { RakhiTyingState } from '../rakhi/tyingStateMachine';
 
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 export type CeremonyMessage =
   | { type: 'ROLE_SELECTED'; role: CeremonyRole }
@@ -19,7 +19,7 @@ export type CeremonyMessage =
   | { type: 'GIVER_HANDS'; payload: NormalizedHand[] }
   | { type: 'RAKHI_STATE'; state: RakhiTyingState; instruction: string; progress: number }
   | { type: 'RAKHI_ATTACHED'; timestamp: number }
-  | { type: 'BLESSING'; timestamp: number }
+  | { type: 'BLESSING'; timestamp: number; target: CeremonyRole }
   | { type: 'TIMER_SYNC'; remaining: number; timestamp: number }
   | { type: 'MEDIA_STATE'; audio: boolean; video: boolean }
   | { type: 'CALL_END'; timestamp: number; reason: 'MANUAL' | 'TIMER' | 'DISCONNECT' }
@@ -66,8 +66,9 @@ export const isCeremonyMessage = (value: unknown): value is CeremonyMessage => {
     case 'TIMER_SYNC': return finite(message.remaining) && message.remaining >= 0 && message.remaining <= 1800 && timed();
     case 'MEDIA_STATE': return typeof message.audio === 'boolean' && typeof message.video === 'boolean';
     case 'CALL_END': return timed() && (message.reason === 'MANUAL' || message.reason === 'TIMER' || message.reason === 'DISCONNECT');
+    case 'BLESSING': return timed() && (message.target === 'GIVER' || message.target === 'RECEIVER');
     case 'AARTI_START': case 'AARTI_COMPLETE': case 'TILAK_START': case 'TILAK_ANIMATE': case 'TILAK_APPLIED':
-    case 'RAKHI_START': case 'RAKHI_ATTACHED': case 'BLESSING': case 'PING': case 'PONG': return timed();
+    case 'RAKHI_START': case 'RAKHI_ATTACHED': case 'PING': case 'PONG': return timed();
     default: return false;
   }
 };
