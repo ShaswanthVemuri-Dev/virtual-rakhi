@@ -1,15 +1,17 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import type { WristAnchor } from '../types/vision';
+import type { NormalizedHand, Vec3, WristAnchor } from '../types/vision';
+import type { RakhiTyingState } from '../rakhi/tyingStateMachine';
+import { retargetHand } from '../rakhi/handRetargeting';
 import { publicUrl } from '../app/baseUrl';
 
-/** Lightweight screen-space AR renderer: real 3D ornament + a wrist-sized band. */
 export class Rakhi3DRenderer {
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
-  private camera = new THREE.OrthographicCamera(0, 1, 1, 0, 0.1, 100);
-  private root = new THREE.Group();
+  private camera = new THREE.OrthographicCamera(0, 1, 1, 0, .1, 100);
+  private attached = new THREE.Group();
   private ornament = new THREE.Group();
+  private carried = new THREE.Group();
   private width = 1;
   private height = 1;
 
@@ -18,92 +20,103 @@ export class Rakhi3DRenderer {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = 1.08;
     this.camera.position.z = 10;
-    this.scene.add(new THREE.HemisphereLight(0xfff3df, 0x6b3b2b, 2.3));
-    const key = new THREE.DirectionalLight(0xffffff, 3.1);
+    this.scene.add(new THREE.HemisphereLight(0xfff4df, 0x5a3028, 2.4));
+    const key = new THREE.DirectionalLight(0xffffff, 3.2);
     key.position.set(-2, -3, 6);
-    this.scene.add(key, this.root);
-    this.buildBand();
-    void this.loadOrnament();
+    this.scene.add(key, this.attached, this.carried);
+    this.buildWristWrap();
+    void this.loadSuppliedModel();
   }
 
-  private buildBand() {
-    const thread = new THREE.MeshStandardMaterial({ color: 0xb51f2e, roughness: 0.65, metalness: 0.05 });
-    const gold = new THREE.MeshStandardMaterial({ color: 0xe3ad32, roughness: 0.48, metalness: 0.25 });
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(1, 0.075, 12, 64), thread);
-    const accent = new THREE.Mesh(new THREE.TorusGeometry(1, 0.025, 8, 64), gold);
-    ring.scale.y = 0.43;
-    accent.scale.y = 0.43;
-    ring.renderOrder = 2;
-    accent.renderOrder = 3;
-
-    // This depth-only wrist proxy hides the rear thread and the ornament when the
-    // hand rolls away, creating wrap-around occlusion without sending video depth.
+  private buildWristWrap() {
+    const red = new THREE.MeshStandardMaterial({ color: 0xb51f2e, roughness: .68, metalness: .04 });
+    const gold = new THREE.MeshStandardMaterial({ color: 0xe3ad32, roughness: .5, metalness: .22 });
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(1, .075, 12, 64), red);
+    const accent = new THREE.Mesh(new THREE.TorusGeometry(1, .025, 8, 64), gold);
+    ring.scale.y = accent.scale.y = .43;
+    ring.renderOrder = 2; accent.renderOrder = 3;
     const occluder = new THREE.Mesh(
-      new THREE.CapsuleGeometry(0.58, 1.5, 8, 16),
+      new THREE.CapsuleGeometry(.58, 1.5, 8, 16),
       new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: true }),
     );
     occluder.rotation.z = Math.PI / 2;
-    occluder.scale.set(1, 1, 0.34);
+    occluder.scale.set(1, 1, .34);
     occluder.renderOrder = 1;
-    this.ornament.position.set(0, -0.44, 0.23);
+    this.ornament.position.set(0, -.44, .23);
     this.ornament.renderOrder = 4;
-    this.root.add(occluder, ring, accent, this.ornament);
+    this.attached.add(occluder, ring, accent, this.ornament);
   }
 
-  private async loadOrnament() {
+  private async loadSuppliedModel() {
     try {
-      const gltf = await new GLTFLoader().loadAsync(publicUrl('assets/rakhi.glb'));
-      const model = gltf.scene;
-      model.updateMatrixWorld(true);
-      const whole = new THREE.Box3().setFromObject(model);
-      const size = whole.getSize(new THREE.Vector3());
-      const major: 'x' | 'y' | 'z' = size.x >= size.y && size.x >= size.z ? 'x' : size.y >= size.z ? 'y' : 'z';
-      const center = whole.getCenter(new THREE.Vector3());
-      const half = size[major] * 0.36;
-      model.traverse((object) => {
-        if (!(object instanceof THREE.Mesh)) return;
-        const box = new THREE.Box3().setFromObject(object);
-        const meshCenter = box.getCenter(new THREE.Vector3());
-        if (Math.abs(meshCenter[major] - center[major]) > half) object.visible = false;
-        object.castShadow = false;
-        object.receiveShadow = false;
+      const original = (await new GLTFLoader().loadAsync(publicUrl('assets/rakhi.glb'))).scene;
+      original.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(original);
+      const size = box.getSize(new THREE.Vector3());
+      const max = Math.max(size.x, size.y, size.z) || 1;
+      const center = box.getCenter(new THREE.Vector3());
+      original.position.sub(center);
+      original.scale.setScalar(1 / max);
+      original.rotation.x = Math.PI / 2;
+      original.traverse((object) => {
+        if (object instanceof THREE.Mesh) { object.castShadow = false; object.receiveShadow = false; }
       });
-      const kept = new THREE.Box3().setFromObject(model);
-      const keptSize = kept.getSize(new THREE.Vector3());
-      const max = Math.max(keptSize.x, keptSize.y, keptSize.z) || 1;
-      model.position.sub(kept.getCenter(new THREE.Vector3()));
-      model.scale.setScalar(1.05 / max);
-      model.rotation.set(Math.PI / 2, 0, 0);
-      this.ornament.add(model);
+      // Both views are clones of the one supplied GLB—not 2D crops or replacement artwork.
+      const attachedModel = original.clone(true);
+      attachedModel.scale.multiplyScalar(1.18);
+      this.ornament.add(attachedModel);
+      const carriedModel = original.clone(true);
+      carriedModel.scale.multiplyScalar(1.55);
+      this.carried.add(carriedModel);
     } catch (error) {
-      console.warn('The 3D Rakhi ornament could not load; the procedural band remains available.', error);
-      const fallback = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.42, 0.42, 0.12, 32),
-        new THREE.MeshStandardMaterial({ color: 0xd6a52f, roughness: 0.45, metalness: 0.35 }),
-      );
-      fallback.rotation.x = Math.PI / 2;
-      this.ornament.add(fallback);
+      console.error('The supplied 3D Rakhi could not be loaded.', error);
     }
   }
 
-  draw(anchor: WristAnchor | null, mirrored: boolean, visible: boolean) {
+  draw(anchor: WristAnchor | null, hands: NormalizedHand[], state: RakhiTyingState, mirrored: boolean) {
     this.resize();
-    this.root.visible = !!anchor && visible && anchor.confidence >= 0.48;
-    if (anchor && this.root.visible) {
-      const x = (mirrored ? 1 - anchor.x : anchor.x) * this.width;
-      const y = anchor.y * this.height;
-      const angle = mirrored ? Math.PI - anchor.angle : anchor.angle;
-      const wristPx = Math.max(46, (anchor.wristWidth ?? anchor.scale * 0.42) * this.width);
-      const facing = THREE.MathUtils.clamp(anchor.dorsalFacing ?? 0.7, 0, 1);
-      this.root.position.set(x, y, 0);
-      this.root.rotation.set((1 - facing) * Math.PI, 0, angle);
-      this.root.scale.setScalar(wristPx * 0.5);
-      this.ornament.visible = facing > 0.18;
-      this.ornament.scale.setScalar(0.72 + facing * 0.28);
-    }
+    const attachedVisible = !!anchor && (state === 'FINISHING_ANIMATION' || state === 'RAKHI_ATTACHED') && anchor.confidence >= .45;
+    this.attached.visible = attachedVisible;
+    if (anchor && attachedVisible) this.placeOnWrist(anchor, mirrored);
+
+    const carrying = !!anchor && (state === 'APPROACHING_WRIST' || state === 'ALIGNMENT_VALID') && hands.length === 2;
+    this.carried.visible = carrying;
+    if (anchor && carrying) this.placeBetweenPinches(anchor, hands, mirrored);
     this.renderer.render(this.scene, this.camera);
+  }
+
+  private placeOnWrist(anchor: WristAnchor, mirrored: boolean) {
+    const x = (mirrored ? 1 - anchor.x : anchor.x) * this.width;
+    const y = anchor.y * this.height;
+    const angle = mirrored ? Math.PI - anchor.angle : anchor.angle;
+    const wristPx = Math.max(46, (anchor.wristWidth ?? anchor.scale * .42) * this.width);
+    const facing = THREE.MathUtils.clamp(anchor.dorsalFacing ?? .7, 0, 1);
+    this.attached.position.set(x, y, 0);
+    this.attached.rotation.set((1 - facing) * Math.PI, 0, angle);
+    this.attached.scale.setScalar(wristPx * .5);
+    this.ornament.visible = facing > .12;
+    this.ornament.scale.setScalar(.78 + facing * .22);
+  }
+
+  private placeBetweenPinches(anchor: WristAnchor, hands: NormalizedHand[], mirrored: boolean) {
+    const targetScale = Math.max(.045, anchor.scale * .42);
+    const points = hands.map((hand) => retargetHand(hand, {
+      x: anchor.x, y: anchor.y, palmScale: targetScale,
+      angle: anchor.angle - Math.PI / 2, motionGain: .92,
+    }));
+    const pinch = (landmarks: Vec3[]) => ({
+      x: ((landmarks[4]?.x ?? landmarks[0].x) + (landmarks[8]?.x ?? landmarks[0].x)) / 2,
+      y: ((landmarks[4]?.y ?? landmarks[0].y) + (landmarks[8]?.y ?? landmarks[0].y)) / 2,
+    });
+    const map = (p: { x: number; y: number }) => ({ x: (mirrored ? 1 - p.x : p.x) * this.width, y: p.y * this.height });
+    const a = map(pinch(points[0]));
+    const b = map(pinch(points[1]));
+    const span = Math.hypot(b.x - a.x, b.y - a.y);
+    this.carried.position.set((a.x + b.x) / 2, (a.y + b.y) / 2, .4);
+    this.carried.rotation.set(0, 0, Math.atan2(b.y - a.y, b.x - a.x));
+    this.carried.scale.setScalar(THREE.MathUtils.clamp(span * .8, 70, 210));
   }
 
   private resize() {
@@ -120,8 +133,7 @@ export class Rakhi3DRenderer {
     this.scene.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) return;
       object.geometry.dispose();
-      const materials = Array.isArray(object.material) ? object.material : [object.material];
-      materials.forEach((material) => material.dispose());
+      (Array.isArray(object.material) ? object.material : [object.material]).forEach((material) => material.dispose());
     });
     this.renderer.dispose();
   }

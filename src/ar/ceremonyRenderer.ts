@@ -4,7 +4,6 @@ import type { RakhiTyingState } from '../rakhi/tyingStateMachine';
 import { retargetHand } from '../rakhi/handRetargeting';
 import { drawHandShadow } from './handShadowRenderer';
 import { TilakRenderer } from './tilakRenderer';
-import { RakhiRenderer } from './rakhiRenderer';
 import { AartiRenderer } from './aartiRenderer';
 import { TilakHandRenderer } from './tilakHandRenderer';
 
@@ -16,22 +15,17 @@ export interface CeremonyRenderOptions {
   frozenWrist: WristAnchor | null;
   rakhiState: RakhiTyingState;
   mirrored?: boolean;
-  use3dRakhi?: boolean;
 }
 
 const activeHandStates = new Set<RakhiTyingState>([
   'WAIT_FOR_GIVER_HANDS',
-  'POSITIONING',
   'APPROACHING_WRIST',
   'ALIGNMENT_VALID',
-  'WAIT_FOR_HAND_CONTACT',
-  'TYING_GESTURE',
   'FINISHING_ANIMATION',
 ]);
 
 export class CeremonyRenderer {
   private tilak = new TilakRenderer();
-  private rakhi = new RakhiRenderer();
   private aarti = new AartiRenderer();
   private tilakHand = new TilakHandRenderer();
 
@@ -62,8 +56,6 @@ export class CeremonyRenderer {
     const targetWrist = options.frozenWrist ?? wrist.value;
     if (activeHandStates.has(options.rakhiState) && targetWrist) {
       this.drawRetargetedHands(ctx, frame.normalizedHands, targetWrist, options.rakhiState, mirrored);
-    } else if (options.rakhiAttached && wrist.value && !options.use3dRakhi) {
-      this.rakhi.drawWrapped(ctx, wrist.value, wrist.alpha, mirrored);
     }
 
   }
@@ -88,8 +80,6 @@ export class CeremonyRenderer {
       drawHandShadow(ctx, points, { mirror: mirrored, alpha: fade });
       return points;
     });
-    if (state === 'FINISHING_ANIMATION') this.rakhi.drawWrapped(ctx, wrist, 1, mirrored);
-    else this.rakhi.drawCarried(ctx, retargeted, wrist, 0.95, mirrored);
   }
 
 }

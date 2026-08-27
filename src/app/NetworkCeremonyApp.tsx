@@ -102,12 +102,15 @@ export default function NetworkCeremonyApp() {
   const [roleModal, setRoleModal] = useState(false);
   const [pendingHosting, setPendingHosting] = useState<boolean | null>(null);
   const [roleConflict, setRoleConflict] = useState(false);
+  const [audioEnabled, setAudioEnabled] = useState(true);
+  const [videoEnabled, setVideoEnabled] = useState(true);
+  const [remoteMedia, setRemoteMedia] = useState({ audio: true, video: true });
 
   const totalDuration = useMemo(() => parseCallDurationSeconds(), []);
   const computedFeatures = useMemo(() => deriveNetworkVisionFeatures(role, {
     faceActivated, wristActivated, giverHandsActive, rakhiState,
   }), [role, faceActivated, wristActivated, giverHandsActive, rakhiState]);
-  const receiverFocus = role === 'RECEIVER' && (activeRitual !== null || rakhiAttached);
+  const receiverFocus = role === 'RECEIVER' && (activeRitual !== null || tilakApplied || rakhiAttached);
 
   const setRole = (value: CeremonyRole) => { roleRef.current = value; setRoleState(value); };
   const setActiveRitual = (value: ActiveRitual) => { activeRitualRef.current = value; setActiveRitualState(value); };
@@ -220,6 +223,8 @@ export default function NetworkCeremonyApp() {
       const media = await acquireCameraThenMicrophone();
       mediaStarted = true;
       localStreamRef.current = media.stream;
+      setAudioEnabled(media.stream.getAudioTracks().some((track) => track.enabled));
+      setVideoEnabled(media.stream.getVideoTracks().some((track) => track.enabled));
       setMicrophoneWarning(media.microphoneError);
       hostRef.current = hosting;
       setIsHost(hosting);
@@ -250,6 +255,11 @@ export default function NetworkCeremonyApp() {
     setConnectionState(state);
     if (state === 'CONNECTED') {
       connectedRef.current = true;
+      send({
+        type: 'MEDIA_STATE',
+        audio: localStreamRef.current?.getAudioTracks().some((track) => track.enabled) ?? false,
+        video: localStreamRef.current?.getVideoTracks().some((track) => track.enabled) ?? false,
+      });
       if (hostRef.current) setNotice('Connected. Waiting for your sibling to confirm their role…');
       else { send({ type: 'ROLE_SELECTED', role: roleRef.current }); setNotice('Connected. Confirming your ceremony role…'); }
     } else if (state === 'DISCONNECTED' && sessionState === 'ACTIVE') {
@@ -273,7 +283,7 @@ export default function NetworkCeremonyApp() {
 
   const beginRemoteRakhi = () => {
     setWristActivated(true);
-    setGiverHandsActive(roleRef.current === 'GIVER');
+    setGiverHandsActive(false);
     setActiveRitual('RAKHI');
     if (roleRef.current === 'GIVER') {
       const update = machineRef.current.start();
@@ -337,10 +347,12 @@ export default function NetworkCeremonyApp() {
       case 'RAKHI_STATE': setRakhiState(message.state); setRakhiInstruction(message.instruction); setRakhiProgress(message.progress); break;
       case 'RAKHI_ATTACHED':
         setRakhiAttached(true); setGiverHandsActive(false); setRakhiState('RAKHI_ATTACHED'); setRakhiProgress(1); setActiveRitual(null);
+        remoteHandsRef.current = [];
         setRakhiInstruction('Rakhi tied. Keep the right wrist visible so the wrapped Rakhi follows it.');
         setNotice('Rakhi tied. Giver hand tracking has stopped; receiver wrist tracking remains active.');
         break;
       case 'BLESSING': setBlessingBurst(Date.now()); setNotice('A blessing arrived.'); break;
+      case 'MEDIA_STATE': setRemoteMedia({ audio: message.audio, video: message.video }); break;
       case 'TIMER_SYNC': setRemaining((current) => Math.abs(current - message.remaining) > 1 ? message.remaining : current); break;
       case 'CALL_END': finishFromRemote(message.reason === 'TIMER' ? 'The synchronized 30-minute session ended.' : 'The other participant ended the call.'); break;
       case 'PING': send({ type: 'PONG', timestamp: message.timestamp }); break;
@@ -410,6 +422,8 @@ export default function NetworkCeremonyApp() {
 
       if (roleRef.current === 'GIVER' && activeRitualRef.current === 'RAKHI') {
         const update = machineRef.current.update(now, remoteWristRef.current, local.normalizedHands, true);
+        if (update.state === 'WAIT_FOR_GIVER_HANDS' && !giverHandsActive) setGiverHandsActive(true);
+        if (update.state === 'WAIT_FOR_RECEIVER_WRIST' && giverHandsActive) setGiverHandsActive(false);
         if (update.state !== rakhiStateRef.current) setRakhiState(update.state);
         setRakhiInstruction(update.instruction);
         setRakhiProgress(update.progress);
@@ -420,6 +434,7 @@ export default function NetworkCeremonyApp() {
         if (update.attachedNow) {
           setRakhiAttached(true);
           setGiverHandsActive(false);
+          remoteHandsRef.current = [];
           setWristActivated(true);
           setActiveRitual(null);
           send({ type: 'RAKHI_ATTACHED', timestamp: Date.now() });
@@ -439,9 +454,8 @@ export default function NetworkCeremonyApp() {
         frozenWrist: null,
         rakhiState: rakhiStateRef.current,
         mirrored: roleRef.current === 'RECEIVER',
-        use3dRakhi: true,
       });
-      rakhi3dRef.current?.draw(wristHeld.value, roleRef.current === 'RECEIVER', rakhiAttachedRef.current || rakhiStateRef.current === 'FINISHING_ANIMATION');
+      rakhi3dRef.current?.draw(wristHeld.value, composed.normalizedHands, rakhiStateRef.current, roleRef.current === 'RECEIVER');
       if (now - lastUiRef.current >= 120) {
         lastUiRef.current = now;
         setFrame({ ...composed, stats: { ...composed.stats } });
@@ -475,6 +489,14 @@ export default function NetworkCeremonyApp() {
   const startRakhi = () => { beginRemoteRakhi(); send({ type: 'RAKHI_START', timestamp: Date.now() }); };
   const giveBlessing = () => { send({ type: 'BLESSING', timestamp: Date.now() }); setNotice('Blessing sent.'); };
   const endSession = () => { send({ type: 'CALL_END', timestamp: Date.now(), reason: 'MANUAL' }); finishFromRemote('Session ended cleanly. Camera, microphone, WebRTC, data channel, CV models, and animation loops were released.'); };
+  const toggleMedia = (kind: 'audio' | 'video') => {
+    const tracks = kind === 'audio' ? localStreamRef.current?.getAudioTracks() : localStreamRef.current?.getVideoTracks();
+    if (!tracks?.length) return;
+    const next = !tracks.some((track) => track.enabled);
+    tracks.forEach((track) => { track.enabled = next; });
+    if (kind === 'audio') { setAudioEnabled(next); send({ type: 'MEDIA_STATE', audio: next, video: videoEnabled }); }
+    else { setVideoEnabled(next); send({ type: 'MEDIA_STATE', audio: audioEnabled, video: next }); }
+  };
 
   const returnToLobby = () => {
     releaseAll();
@@ -551,8 +573,8 @@ export default function NetworkCeremonyApp() {
     <section className="ceremony-session">
       <video ref={trackingVideoRef} className="tracking-video" playsInline muted />
       <div className="session-bar">
-        <div><div className="eyebrow">ROOM {roomCode} · {role}</div><strong>{notice}</strong></div>
-        <div className="session-actions"><span className={`connection-chip ${connectionState.toLowerCase()}`}>{connectionState}</span><button className="view-toggle" onClick={() => setSplitView((value) => !value)}>{splitView ? 'Focus view' : 'Split view'}</button><Timer remaining={remaining} total={sessionDuration} /><button className="secondary" onClick={endSession}>End</button></div>
+        <div><div className="room-code-chip"><span>Meeting code</span><strong>{roomCode}</strong><button onClick={() => void navigator.clipboard.writeText(roomCode)}>Copy</button></div><small className="role-label">{role === 'GIVER' ? 'Sister · tying Rakhi' : 'Brother · receiving Rakhi'}</small><strong>{notice}</strong></div>
+        <div className="session-actions"><span className={`connection-chip ${connectionState.toLowerCase()}`}>{connectionState}</span><button className={`media-button ${audioEnabled ? '' : 'off'}`} aria-pressed={!audioEnabled} onClick={() => toggleMedia('audio')}>{audioEnabled ? 'Mute' : 'Unmute'}</button><button className={`media-button ${videoEnabled ? '' : 'off'}`} aria-pressed={!videoEnabled} onClick={() => toggleMedia('video')}>{videoEnabled ? 'Camera off' : 'Camera on'}</button><button className="view-toggle" onClick={() => setSplitView((value) => !value)}>{splitView ? 'Focus view' : 'Split view'}</button><Timer remaining={remaining} total={sessionDuration} /><button className="secondary" onClick={endSession}>End</button></div>
       </div>
       {microphoneWarning && <div className="warning-banner compact-warning"><strong>Video-only:</strong> {microphoneWarning}</div>}
       {error && <div className="error-banner">{error}</div>}
@@ -560,20 +582,20 @@ export default function NetworkCeremonyApp() {
           <div className={`ceremony-stage-card ${activeRitual === 'RAKHI' ? 'rakhi-priority' : ''}`}>
           <div className="stage-heading"><div><span className="status-dot" data-state={remoteReady ? 'ON' : 'STARTING'} />{receiverFocus ? 'Your ceremony view' : 'Your sibling'}</div><span>{receiverFocus ? 'YOUR CAMERA · MIRRORED' : 'REMOTE · LIVE'}</span></div>
           <div className={`video-stage ceremony-video-stage ${receiverFocus ? '' : 'remote-main'}`}>
-            <video ref={mainVideoRef} playsInline muted={role === 'RECEIVER'} />
+            <video ref={mainVideoRef} playsInline muted={receiverFocus} />
             <canvas ref={canvasRef} className="overlay-canvas" />
             <canvas ref={rakhi3dCanvasRef} className="rakhi-3d-canvas" aria-hidden="true" />
             <BlessingBurst burstId={blessingBurst} />
             {!remoteReady && role === 'GIVER' && <div className="camera-placeholder"><strong>Waiting for receiver video…</strong><span>The data channel may connect a moment before media.</span></div>}
             <div className={`self-pip ${receiverFocus ? 'remote-pip' : ''}`}><video ref={pipVideoRef} playsInline muted={!receiverFocus} /><span>{receiverFocus ? 'YOUR SIBLING' : 'YOU'}</span></div>
-            {activeRitual === 'RAKHI' && rakhiState !== 'RAKHI_ATTACHED' && role === 'GIVER' && <div className="hand-guide"><div className="guide-hand left">L</div><div className="center-guide">MOVE BOTH HANDS HERE</div><div className="guide-hand right">R</div></div>}
+            {activeRitual === 'RAKHI' && rakhiState !== 'RAKHI_ATTACHED' && role === 'GIVER' && <div className="hand-guide"><div className="center-guide">{rakhiState === 'WAIT_FOR_RECEIVER_WRIST' ? 'Waiting for him to show his wrist…' : rakhiState === 'WAIT_FOR_GIVER_HANDS' || rakhiState === 'POSITIONING' ? 'Show both palms and pinch thumb + index' : 'Move the 3D Rakhi toward his wrist'}</div></div>}
           </div>
           <CeremonyControls role={role} activeRitual={activeRitual} tilakApplied={tilakApplied} rakhiAttached={rakhiAttached} aartiComplete={aartiComplete} disabled={connectionState !== 'CONNECTED'} onAarti={startAarti} onTilak={startTilak} onRakhi={startRakhi} onBlessing={giveBlessing} />
         </div>
         <aside className="ceremony-side">
           {activeRitual === 'RAKHI' && role === 'RECEIVER' && <WristPoseGuide />}
           <CeremonyGuide activeRitual={activeRitual} rakhiState={rakhiState} instruction={activeRitual === 'AARTI' ? 'Aarti is moving in three gentle clockwise circles.' : activeRitual === 'TILAK' ? tilakFlow === 'WAIT_FACE' ? 'Look toward the camera and hold still for a moment.' : 'The Tilak is being applied.' : rakhiInstruction} progress={rakhiProgress} status={guideStatus} nextStep={!aartiComplete ? role === 'GIVER' ? 'Begin with Aarti.' : 'Your sister will begin with Aarti.' : !tilakApplied ? role === 'GIVER' ? 'Apply the Tilak.' : 'Look toward the camera for the Tilak.' : !rakhiAttached ? role === 'GIVER' ? 'Choose Rakhi and bring both hands into view.' : 'Raise your right fist with the knuckle side toward the camera.' : 'If you are the elder sibling, offer a blessing.'} />
-          <div className="ceremony-checks"><div><span>WebRTC media</span><strong>{remoteReady ? 'LIVE' : 'CONNECTING'}</strong></div><div><span>Data channel</span><strong>{connectionState}</strong></div><div><span>Microphone</span><strong>{localStreamRef.current?.getAudioTracks().some((track) => track.readyState === 'live') ? 'LIVE' : 'VIDEO ONLY'}</strong></div><div><span>Tilak / Rakhi</span><strong>{tilakApplied ? 'TILAK ✓ ' : ''}{rakhiAttached ? 'RAKHI ✓' : ''}</strong></div></div>
+          <div className="ceremony-checks"><div><span>WebRTC media</span><strong>{remoteReady ? 'LIVE' : 'CONNECTING'}</strong></div><div><span>Your microphone / camera</span><strong>{audioEnabled ? 'ON' : 'MUTED'} · {videoEnabled ? 'ON' : 'OFF'}</strong></div><div><span>Sibling microphone / camera</span><strong>{remoteMedia.audio ? 'ON' : 'MUTED'} · {remoteMedia.video ? 'ON' : 'OFF'}</strong></div><div><span>Tilak / Rakhi</span><strong>{tilakApplied ? 'TILAK ✓ ' : ''}{rakhiAttached ? 'RAKHI ✓' : ''}</strong></div></div>
         </aside>
       </div>
     </section>

@@ -1,7 +1,6 @@
 import { publicUrl } from './baseUrl';
 
 export const REQUIRED_ASSETS = [
-  'assets/rakhi.png',
   'assets/tilak.png',
   'assets/tilak_hand.png',
   'assets/aarti_thali.png',

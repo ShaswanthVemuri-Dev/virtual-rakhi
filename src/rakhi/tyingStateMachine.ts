@@ -21,174 +21,82 @@ export interface TyingUpdate {
   attachedNow?: boolean;
 }
 
-const instructions: Record<RakhiTyingState, string> = {
+const copy: Record<RakhiTyingState, string> = {
   IDLE: 'Ready to begin Rakhi tying.',
-  WAIT_FOR_RECEIVER_WRIST: 'Brother, raise your right fist with the knuckle side facing the camera.',
-  WAIT_FOR_GIVER_HANDS: 'Sister, bring both hands into view with the Rakhi held between your fingers.',
-  POSITIONING: 'Keep both hands visible and comfortably apart.',
-  APPROACHING_WRIST: 'Move both hands gently toward your brother’s wrist.',
-  ALIGNMENT_VALID: 'That is the right place. Hold steady.',
-  WAIT_FOR_HAND_CONTACT: 'Bring your fingers together as though wrapping the thread.',
-  TYING_GESTURE: 'Hold for a moment to secure the Rakhi.',
-  FINISHING_ANIMATION: 'Securing the Rakhi…',
-  RAKHI_ATTACHED: 'The Rakhi is tied. Keep the right wrist visible to see it move naturally.',
+  WAIT_FOR_RECEIVER_WRIST: 'Waiting for your brother to hold his right wrist toward the camera.',
+  WAIT_FOR_GIVER_HANDS: 'His wrist is ready. Show both palms and pinch each thumb and index finger.',
+  POSITIONING: 'Pinch each thumb and index finger to pick up the Rakhi.',
+  APPROACHING_WRIST: 'The Rakhi is in your hands. Move it gently toward his wrist.',
+  ALIGNMENT_VALID: 'Perfect — attaching the Rakhi now.',
+  WAIT_FOR_HAND_CONTACT: 'Move the Rakhi toward his wrist.',
+  TYING_GESTURE: 'Attaching the Rakhi.',
+  FINISHING_ANIMATION: 'The Rakhi has locked onto his wrist. You can remove your hands.',
+  RAKHI_ATTACHED: 'Rakhi tied. Hand tracking is now off; keep his wrist visible.',
+};
+
+const pinching = (hand: NormalizedHand) => {
+  const thumb = hand.localLandmarks[4];
+  const index = hand.localLandmarks[8];
+  return !!thumb && !!index && Math.hypot(thumb.x - index.x, thumb.y - index.y, thumb.z - index.z) <= 0.42;
 };
 
 export class RakhiTyingMachine {
   private state: RakhiTyingState = 'IDLE';
   private stableSince = -1;
-  private hadHandsApart = false;
-  private finishingSince = -1;
 
-  reset() {
-    this.state = 'IDLE';
-    this.stableSince = -1;
-    this.hadHandsApart = false;
-    this.finishingSince = -1;
-  }
-
-  start() {
-    this.state = 'WAIT_FOR_RECEIVER_WRIST';
-    this.stableSince = -1;
-    this.hadHandsApart = false;
-    this.finishingSince = -1;
-    return this.snapshot();
-  }
-
-  getState() {
-    return this.state;
-  }
+  reset() { this.state = 'IDLE'; this.stableSince = -1; }
+  start() { this.state = 'WAIT_FOR_RECEIVER_WRIST'; this.stableSince = -1; return this.snapshot(); }
+  getState() { return this.state; }
 
   private setState(next: RakhiTyingState, now: number) {
-    if (next === this.state) return;
-    this.state = next;
-    this.stableSince = now;
-    if (next === 'FINISHING_ANIMATION') this.finishingSince = now;
+    if (next !== this.state) { this.state = next; this.stableSince = now; }
   }
 
   private snapshot(extra: Partial<TyingUpdate> = {}): TyingUpdate {
-    const progressMap: Record<RakhiTyingState, number> = {
-      IDLE: 0,
-      WAIT_FOR_RECEIVER_WRIST: 0.08,
-      WAIT_FOR_GIVER_HANDS: 0.2,
-      POSITIONING: 0.34,
-      APPROACHING_WRIST: 0.5,
-      ALIGNMENT_VALID: 0.66,
-      WAIT_FOR_HAND_CONTACT: 0.75,
-      TYING_GESTURE: 0.88,
-      FINISHING_ANIMATION: 0.95,
-      RAKHI_ATTACHED: 1,
+    const progress: Record<RakhiTyingState, number> = {
+      IDLE: 0, WAIT_FOR_RECEIVER_WRIST: .08, WAIT_FOR_GIVER_HANDS: .28, POSITIONING: .4,
+      APPROACHING_WRIST: .68, ALIGNMENT_VALID: .9, WAIT_FOR_HAND_CONTACT: .68,
+      TYING_GESTURE: .9, FINISHING_ANIMATION: .97, RAKHI_ATTACHED: 1,
     };
-    return {
-      state: this.state,
-      instruction: instructions[this.state],
-      progress: progressMap[this.state],
-      ...extra,
-    };
+    return { state: this.state, instruction: copy[this.state], progress: progress[this.state], ...extra };
   }
 
   update(now: number, wrist: WristAnchor | null, hands: NormalizedHand[], requireContinuousWrist = false): TyingUpdate {
     if (this.state === 'IDLE' || this.state === 'RAKHI_ATTACHED') return this.snapshot();
 
     if (this.state === 'WAIT_FOR_RECEIVER_WRIST') {
-      const ready = !!wrist && wrist.confidence >= 0.72;
-      if (!ready) {
-        this.stableSince = -1;
-        return this.snapshot();
-      }
+      if (!wrist || wrist.confidence < .62) { this.stableSince = -1; return this.snapshot(); }
       if (this.stableSince < 0) this.stableSince = now;
-      if (now - this.stableSince >= 500) {
+      if (now - this.stableSince >= 350) {
         this.setState('WAIT_FOR_GIVER_HANDS', now);
-        return this.snapshot({ captureWrist: wrist ?? undefined });
+        return this.snapshot({ captureWrist: wrist });
       }
       return this.snapshot();
     }
 
     if (this.state === 'FINISHING_ANIMATION') {
-      if (now - this.finishingSince >= 800) {
+      if (now - this.stableSince >= 220) {
         this.setState('RAKHI_ATTACHED', now);
         return this.snapshot({ attachedNow: true });
       }
       return this.snapshot();
     }
 
-    if (requireContinuousWrist && (!wrist || wrist.confidence < 0.6)) {
+    if (requireContinuousWrist && (!wrist || wrist.confidence < .48)) {
       this.setState('WAIT_FOR_RECEIVER_WRIST', now);
       return this.snapshot();
     }
 
-    const goodHands = hands.length === 2 && hands.every((hand) => hand.confidence >= 0.70);
-    if (!goodHands) {
-      if (this.state !== 'WAIT_FOR_GIVER_HANDS') this.setState('WAIT_FOR_GIVER_HANDS', now);
-      return this.snapshot();
-    }
+    const readyHands = hands.length === 2 && hands.every((hand) => hand.confidence >= .6);
+    if (!readyHands) { this.setState('WAIT_FOR_GIVER_HANDS', now); return this.snapshot(); }
+    const holding = hands.every(pinching);
+    if (!holding) { this.setState('POSITIONING', now); return this.snapshot(); }
 
-    const averagePalmScale = Math.max(0.02, hands.reduce((sum, hand) => sum + hand.palmScale, 0) / hands.length);
-    const handSeparation = Math.hypot(hands[0].wrist.x - hands[1].wrist.x, hands[0].wrist.y - hands[1].wrist.y);
-    const separationRatio = handSeparation / averagePalmScale;
-    const guideDistance = pairGuideDistance(hands);
+    const distance = pairGuideDistance(hands);
+    if (distance > .125) { this.setState('APPROACHING_WRIST', now); return this.snapshot(); }
 
-    if (separationRatio >= 2.0) this.hadHandsApart = true;
-
-    if (this.state === 'WAIT_FOR_GIVER_HANDS') {
-      this.setState('POSITIONING', now);
-      return this.snapshot();
-    }
-
-    if (this.state === 'POSITIONING') {
-      if (separationRatio >= 1.8 && separationRatio <= 8.5) {
-        if (this.stableSince < 0) this.stableSince = now;
-        if (now - this.stableSince >= 220) this.setState('APPROACHING_WRIST', now);
-      } else {
-        this.stableSince = -1;
-      }
-      return this.snapshot();
-    }
-
-    if (this.state === 'APPROACHING_WRIST') {
-      if (guideDistance <= 0.13) {
-        if (this.stableSince < 0) this.stableSince = now;
-        if (now - this.stableSince >= 260) this.setState('ALIGNMENT_VALID', now);
-      } else {
-        this.stableSince = -1;
-      }
-      return this.snapshot();
-    }
-
-    if (this.state === 'ALIGNMENT_VALID') {
-      if (guideDistance > 0.18) {
-        this.setState('APPROACHING_WRIST', now);
-      } else if (now - this.stableSince >= 300) {
-        this.setState('WAIT_FOR_HAND_CONTACT', now);
-      }
-      return this.snapshot();
-    }
-
-    if (this.state === 'WAIT_FOR_HAND_CONTACT') {
-      if (guideDistance > 0.2) {
-        this.setState('APPROACHING_WRIST', now);
-        return this.snapshot();
-      }
-      const contact = this.hadHandsApart && separationRatio <= 1.55;
-      if (contact) {
-        if (this.stableSince < 0) this.stableSince = now;
-        if (now - this.stableSince >= 300) this.setState('TYING_GESTURE', now);
-      } else {
-        this.stableSince = -1;
-      }
-      return this.snapshot();
-    }
-
-    if (this.state === 'TYING_GESTURE') {
-      const stillContact = separationRatio <= 1.75 && guideDistance <= 0.2;
-      if (!stillContact) {
-        this.setState('WAIT_FOR_HAND_CONTACT', now);
-        return this.snapshot();
-      }
-      if (now - this.stableSince >= 350) this.setState('FINISHING_ANIMATION', now);
-      return this.snapshot();
-    }
-
+    if (this.state !== 'ALIGNMENT_VALID') { this.setState('ALIGNMENT_VALID', now); return this.snapshot(); }
+    if (now - this.stableSince >= 140) this.setState('FINISHING_ANIMATION', now);
     return this.snapshot();
   }
 }
