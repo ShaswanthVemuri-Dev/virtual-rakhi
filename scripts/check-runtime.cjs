@@ -3,14 +3,12 @@ const path = require('path');
 const root = path.resolve(__dirname, '..');
 
 const required = [
-  'public/assets/rakhi.png',
   'public/assets/tilak.png',
   'public/assets/tilak_hand.png',
   'public/assets/aarti_thali.png',
   'public/assets/flower_01.png',
   'public/assets/flower_02.png',
   'public/assets/flower_03.png',
-  'public/assets/rakhi.glb',
   'public/models/face_landmarker.task',
   'public/models/hand_landmarker.task',
   'public/models/pose_landmarker.task',

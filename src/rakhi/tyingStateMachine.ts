@@ -31,7 +31,7 @@ const copy: Record<RakhiTyingState, string> = {
   WAIT_FOR_HAND_CONTACT: 'Move the Rakhi toward his wrist.',
   TYING_GESTURE: 'Attaching the Rakhi.',
   FINISHING_ANIMATION: 'The Rakhi has locked onto his wrist. You can remove your hands.',
-  RAKHI_ATTACHED: 'Rakhi tied. Hand tracking is now off; keep his wrist visible.',
+  RAKHI_ATTACHED: 'Rakhi attached.',
 };
 
 const pinching = (hand: NormalizedHand) => {

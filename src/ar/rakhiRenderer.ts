@@ -1,3 +1,3 @@
 // The former 2D Rakhi renderer was intentionally retired.
-// Production rendering now uses only the supplied GLB through Rakhi3DRenderer.
+// Production rendering uses the single procedural 3D system in Rakhi3DRenderer.
 export {};

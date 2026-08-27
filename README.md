@@ -11,7 +11,7 @@ A deployable two-person Raksha Bandhan ceremony built with React, WebRTC, MediaP
 - A 30-minute synchronized call timer.
 - Local-only MediaPipe tracking; frames are not uploaded or stored.
 - Right-hand world landmarks fused with the forearm pose for wrist size, roll and orientation.
-- The supplied GLB ornament, a procedural wrist-sized 3D thread, and a depth-only wrist proxy for front/back occlusion.
+- A single purpose-built procedural 3D Rakhi with wrist-sized thread, flower pendant, roll-aware orientation, and depth-only wrist occlusion.
 - Responsive focus/PIP and split views for desktop and current iPad Safari.
 - Laila throughout, with a light cream/maroon two-tone interface and no gradients.
 

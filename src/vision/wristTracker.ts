@@ -29,7 +29,7 @@ export class WristTracker {
   readonly rate = new RateMeter();
 
   async init() {
-    if (!this.pose || !this.hand) [this.pose, this.hand] = await Promise.all([createPoseLandmarker(), createHandLandmarker(1)]);
+    if (!this.pose || !this.hand) [this.pose, this.hand] = await Promise.all([createPoseLandmarker(), createHandLandmarker(2)]);
   }
 
   async process(video: HTMLVideoElement, now: number): Promise<{ anchor: WristAnchor | null; landmarks: Vec3[] } | null> {
@@ -47,15 +47,22 @@ export class WristTracker {
     const rawElbow = raw[RIGHT_ELBOW] as (typeof raw)[number] & { presence?: number };
     if (!wrist || !elbow || !rawWrist || !rawElbow) return { anchor: null, landmarks };
 
-    const foundRight = handResult.handednesses?.findIndex((h) => h[0]?.categoryName === 'Right') ?? -1;
-    // A Rakhi may attach only to the receiver's right hand. Never substitute
-    // the left hand when the right-hand classifier is uncertain or absent.
-    if (foundRight < 0) return { anchor: null, landmarks };
-    const handIndex = foundRight;
+    // Pose landmarks provide the anatomical right wrist. Associate the closest
+    // detected hand with that point instead of trusting selfie handedness alone
+    // (which can flip when browsers mirror the preview).
+    const detectedHands = handResult.landmarks ?? [];
+    let handIndex = -1;
+    let closestDistance = Number.POSITIVE_INFINITY;
+    detectedHands.forEach((candidate, index) => {
+      if (!candidate?.[0]) return;
+      const separation = distance(candidate[0], wrist);
+      if (separation < closestDistance) { closestDistance = separation; handIndex = index; }
+    });
+    const forearmLength = distance(wrist, elbow);
+    if (handIndex < 0 || closestDistance > Math.max(.13, forearmLength * .9)) return { anchor: null, landmarks };
     const imageHand = handResult.landmarks?.[handIndex];
     const worldHand = handResult.worldLandmarks?.[handIndex];
     const handScore = handResult.handednesses?.[handIndex]?.[0]?.score ?? 0;
-    const forearmLength = distance(wrist, elbow);
     const direction = normalize({ x: wrist.x - elbow.x, y: wrist.y - elbow.y });
     const angle = Math.atan2(direction.y, direction.x) + Math.PI / 2;
     const poseConfidence = Math.min(rawWrist.visibility ?? 0.75, rawElbow.visibility ?? 0.75);
@@ -63,7 +70,13 @@ export class WristTracker {
     let palmNormal: Vec3 = { x: 0, y: 0, z: 1 };
     let handDirection: Vec3 = { x: direction.x, y: direction.y, z: 0 };
     let dorsalFacing = 0.7;
-    if (imageHand?.[INDEX_MCP] && imageHand?.[PINKY_MCP]) wristWidth = clamp(distance(imageHand[INDEX_MCP], imageHand[PINKY_MCP]) * 0.68, 0.03, 0.14);
+    if (imageHand?.[0] && imageHand?.[INDEX_MCP] && imageHand?.[MIDDLE_MCP] && imageHand?.[PINKY_MCP]) {
+      const acrossPalm = distance(imageHand[INDEX_MCP], imageHand[PINKY_MCP]) * .64;
+      const palmLength = distance(imageHand[0], imageHand[MIDDLE_MCP]) * .52;
+      // Max of two independent measurements prevents the bracelet collapsing
+      // when a side-facing fist foreshortens the index-to-pinky distance.
+      wristWidth = clamp(Math.max(acrossPalm, palmLength, forearmLength * .31), .03, .14);
+    }
     if (worldHand?.[0] && worldHand?.[INDEX_MCP] && worldHand?.[PINKY_MCP] && worldHand?.[MIDDLE_MCP]) {
       const side = sub(worldHand[PINKY_MCP], worldHand[INDEX_MCP]);
       const forward = sub(worldHand[MIDDLE_MCP], worldHand[0]);
@@ -73,7 +86,8 @@ export class WristTracker {
       // the cross product is negative when the knuckle/back side faces the lens.
       dorsalFacing = clamp(0.5 - palmNormal.z * 2.2, 0, 1);
     }
-    const confidence = clamp(poseConfidence * 0.54 + handScore * 0.34 + clamp(forearmLength / 0.16, 0, 1) * 0.12, 0, 1);
+    const associationConfidence = clamp(1 - closestDistance / Math.max(.13, forearmLength * .9), 0, 1);
+    const confidence = clamp(poseConfidence * .45 + handScore * .24 + associationConfidence * .2 + clamp(forearmLength / .16, 0, 1) * .11, 0, 1);
     return { landmarks, anchor: {
       x: this.xFilter.filter(imageHand?.[0]?.x ?? wrist.x, now),
       y: this.yFilter.filter(imageHand?.[0]?.y ?? wrist.y, now),

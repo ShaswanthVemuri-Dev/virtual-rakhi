@@ -35,7 +35,7 @@ class BaseRetention<T> {
     const missingFor = now - this.lastSeen;
     if (missingFor <= this.holdMs) return { value: this.display, alpha: 1, state: 'HOLDING' };
     const alpha = Math.max(0, 1 - (missingFor - this.holdMs) / this.fadeMs);
-    if (alpha <= 0) return { value: this.display, alpha: 0, state: 'HIDDEN' };
+    if (alpha <= 0) return { value: null, alpha: 0, state: 'HIDDEN' };
     return { value: this.display, alpha, state: 'FADING' };
   }
 
@@ -60,6 +60,11 @@ export class FaceRetention extends BaseRetention<FaceAnchor> {
 
 export class WristRetention extends BaseRetention<WristAnchor> {
   protected override blend(from: WristAnchor, to: WristAnchor, t: number): WristAnchor {
+    const vec3 = (previous: WristAnchor['palmNormal'], next: WristAnchor['palmNormal']) => {
+      if (!next) return previous;
+      if (!previous) return next;
+      return { x: lerp(previous.x, next.x, t), y: lerp(previous.y, next.y, t), z: lerp(previous.z, next.z, t) };
+    };
     return {
       x: lerp(from.x, to.x, t),
       y: lerp(from.y, to.y, t),
@@ -70,6 +75,10 @@ export class WristRetention extends BaseRetention<WristAnchor> {
         x: lerp(from.forearmDirection.x, to.forearmDirection.x, t),
         y: lerp(from.forearmDirection.y, to.forearmDirection.y, t),
       },
+      wristWidth: to.wristWidth === undefined ? from.wristWidth : from.wristWidth === undefined ? to.wristWidth : lerp(from.wristWidth, to.wristWidth, t),
+      palmNormal: vec3(from.palmNormal, to.palmNormal),
+      handDirection: vec3(from.handDirection, to.handDirection),
+      dorsalFacing: to.dorsalFacing === undefined ? from.dorsalFacing : from.dorsalFacing === undefined ? to.dorsalFacing : lerp(from.dorsalFacing, to.dorsalFacing, t),
     };
   }
 }

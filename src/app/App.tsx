@@ -8,7 +8,7 @@ export default function App() {
         <div><div className="eyebrow">RAKSHA BANDHAN, TOGETHER</div><h1>Virtual Rakhi</h1></div>
       </header>
       <NetworkCeremonyApp />
-      <footer className="app-footer">A private two-person ceremony · Camera frames are never stored</footer>
+      <footer className="app-footer">A private two-person call · No camera or call data is stored</footer>
     </main>
   );
 }
