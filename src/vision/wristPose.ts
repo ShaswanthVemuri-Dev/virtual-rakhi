@@ -33,8 +33,7 @@ export interface RightWristPose {
 
 /** Landmark position/size plus the dedicated VTO solver's screen rotation. */
 export function fuseWristAnchors(position: WristAnchor | null, rotation: WristAnchor | null): WristAnchor | null {
-  if (!position) return rotation;
-  if (!rotation) return position;
+  if (!position || !rotation) return null;
   return {
     ...position,
     angle: rotation.angle,

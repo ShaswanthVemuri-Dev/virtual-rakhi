@@ -51,6 +51,20 @@ const loadRuntime = () => runtimePromise ??= (async () => {
 
 let modelPreload: Promise<unknown> | null = null;
 
+export const fitHybridWristScale = (vtoWidth: number, targetWidth: number, previous: number, ready: boolean) => {
+  const measured = THREE.MathUtils.clamp(targetWidth / vtoWidth, .65, 1.55);
+  return ready ? THREE.MathUtils.lerp(previous, measured, .24) : measured;
+};
+
+export const canRetainRightPose = (hasPose: boolean, positionConfidence: number, missingForMs: number) =>
+  hasPose && positionConfidence >= .42 && missingForMs <= 1_200;
+
+export const translatePoseMatrix = (matrix: THREE.Matrix4, delta: THREE.Vector3) => {
+  matrix.elements[12] += delta.x;
+  matrix.elements[13] += delta.y;
+  matrix.elements[14] += delta.z;
+};
+
 /** Watch-grade wrist VTO: dedicated wrist detector + PnP pose + soft occlusion. */
 export class Rakhi3DRenderer {
   private helper: VtoHelper | null = null;
@@ -59,9 +73,13 @@ export class Rakhi3DRenderer {
   private resizeObserver: ResizeObserver | null = null;
   private trackerCanvas = document.createElement('canvas');
   private attached: THREE.Group | null = null;
+  private occluder: THREE.Mesh | null = null;
   private carried: THREE.Group | null = null;
   private anchor: WristAnchor | null = null;
   private positionAnchor: WristAnchor | null = null;
+  private lastRightPose: THREE.Matrix4 | null = null;
+  private fittedScale = 1;
+  private scaleReady = false;
   private trackerDepth = .92;
   private lastTrackedAt = -Infinity;
   private hands: NormalizedHand[] = [];
@@ -133,13 +151,13 @@ export class Rakhi3DRenderer {
     this.helper.add_threeObject(this.attached);
 
     const radius = 4.55;
-    const occluder = new THREE.Mesh(
+    this.occluder = new THREE.Mesh(
       new THREE.CylinderGeometry(radius, radius, 48, 40, 1, true),
       new THREE.MeshNormalMaterial(),
     );
-    occluder.rotation.x = Math.PI / 2;
-    occluder.position.set(0, -.45, .9);
-    this.helper.add_threeSoftOccluder(occluder, radius, .55, false);
+    this.occluder.rotation.x = Math.PI / 2;
+    this.occluder.position.set(0, -.45, .9);
+    this.helper.add_threeSoftOccluder(this.occluder, radius, .55, false);
 
     this.carried = this.buildCarriedRakhi();
     this.carried.visible = false;
@@ -218,18 +236,39 @@ export class Rakhi3DRenderer {
   private onTrack(detectState: DetectState) {
     const now = performance.now();
     const rightWrist = !!detectState.isDetected && detectState.isRightHand;
-    if (!detectState.isDetected && now - this.lastTrackedAt <= 700) return;
-    if (!rightWrist || !this.three || !this.attached) {
+    if (!this.three || !this.attached) {
       this.anchor = null;
-      if (this.three?.trackersParent[0]) this.three.trackersParent[0].visible = false;
       return;
     }
-    this.lastTrackedAt = now;
     const parent = this.three.trackersParent[0];
+    if (rightWrist) {
+      // Save the unmodified right-hand VTO pose. The helper may overwrite its
+      // single tracker parent with a left hand on the next frame.
+      this.lastTrackedAt = now;
+      this.lastRightPose = parent.matrix.clone();
+    } else if (canRetainRightPose(!!this.lastRightPose, this.positionAnchor?.confidence ?? 0, now - this.lastTrackedAt)) {
+      // Google still sees the anatomical right wrist: retain the last proven
+      // VTO rotation instead of accepting a left-hand pose or disappearing.
+      parent.matrix.copy(this.lastRightPose!);
+      parent.matrixWorldNeedsUpdate = true;
+    } else {
+      this.anchor = null;
+      parent.visible = false;
+      this.updateVisibility();
+      return;
+    }
+
     parent.visible = true;
-    this.three.scene.updateMatrixWorld(true);
     const camera = this.three.camera;
-    this.alignTrackerToLandmark(parent, camera);
+    this.applyHybridPose(parent, camera);
+    this.readAnchor(camera, rightWrist ? detectState.detected : (this.positionAnchor?.confidence ?? 0) * .78);
+    this.updateVisibility();
+    this.placeCarried();
+  }
+
+  private readAnchor(camera: THREE.PerspectiveCamera, confidence: number) {
+    if (!this.attached || !this.three) return;
+    this.three.scene.updateMatrixWorld(true);
     const project = (point: THREE.Vector3) => this.attached!.localToWorld(point).project(camera);
     const center = project(new THREE.Vector3());
     const left = project(new THREE.Vector3(-4.22, 0, 0));
@@ -247,10 +286,8 @@ export class Rakhi3DRenderer {
       wristWidth: THREE.MathUtils.clamp(wristWidth, .03, .16),
       angle: Math.atan2(direction.y, direction.x) + Math.PI / 2,
       forearmDirection: direction,
-      confidence: THREE.MathUtils.clamp(detectState.detected, 0, 1),
+      confidence: THREE.MathUtils.clamp(confidence, 0, 1),
     };
-    this.updateVisibility();
-    this.placeCarried();
   }
 
   draw(hands: NormalizedHand[], state: RakhiTyingState, mirrored: boolean) {
@@ -269,10 +306,27 @@ export class Rakhi3DRenderer {
     this.positionAnchor = anchor;
   }
 
-  private alignTrackerToLandmark(parent: THREE.Object3D, camera: THREE.PerspectiveCamera) {
+  private applyHybridPose(parent: THREE.Object3D, camera: THREE.PerspectiveCamera) {
     if (!this.positionAnchor || this.positionAnchor.confidence < .42 || !this.attached || !this.three) return;
-    // The VTO solve remains authoritative for rotation, depth and scale. Only
-    // correct its X/Y translation with MediaPipe's anatomical wrist landmark.
+    // VTO remains authoritative for the wrist plane, depth and rotation.
+    // MediaPipe contributes retained anatomical position and a bounded size
+    // correction; both the bracelet and its occluder receive the same scale.
+    const targetWidth = this.positionAnchor.wristWidth ?? this.positionAnchor.scale * .42;
+    if (targetWidth > .005) {
+      this.attached.scale.setScalar(1);
+      this.occluder?.scale.setScalar(1);
+      this.three.scene.updateMatrixWorld(true);
+      const left = this.attached.localToWorld(new THREE.Vector3(-4.22, 0, 0)).project(camera);
+      const right = this.attached.localToWorld(new THREE.Vector3(4.22, 0, 0)).project(camera);
+      const vtoWidth = Math.hypot(right.x - left.x, right.y - left.y) / 2;
+      if (vtoWidth > .001 && Number.isFinite(vtoWidth)) {
+        this.fittedScale = fitHybridWristScale(vtoWidth, targetWidth, this.fittedScale, this.scaleReady);
+        this.scaleReady = true;
+        this.attached.scale.setScalar(this.fittedScale);
+        this.occluder?.scale.setScalar(this.fittedScale);
+      }
+    }
+
     this.three.scene.updateMatrixWorld(true);
     const currentWorld = this.attached.localToWorld(new THREE.Vector3());
     const currentNdc = currentWorld.clone().project(camera);
@@ -284,9 +338,7 @@ export class Rakhi3DRenderer {
       this.trackerDepth,
     ).unproject(camera);
     const delta = targetWorld.sub(currentWorld);
-    parent.matrix.elements[12] += delta.x;
-    parent.matrix.elements[13] += delta.y;
-    parent.matrix.elements[14] += delta.z;
+    translatePoseMatrix(parent.matrix, delta);
     parent.matrixWorldNeedsUpdate = true;
     this.three.scene.updateMatrixWorld(true);
   }
@@ -332,6 +384,8 @@ export class Rakhi3DRenderer {
     this.resizeObserver = null;
     this.anchor = null;
     this.positionAnchor = null;
+    this.lastRightPose = null;
+    this.occluder = null;
     if (this.helper && this.startPromise) void this.helper.destroy();
   }
 }

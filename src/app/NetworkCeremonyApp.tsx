@@ -461,13 +461,16 @@ export default function NetworkCeremonyApp() {
         });
       }
       const landmarkWrist = roleRef.current === 'RECEIVER' ? local.wristAnchor : remoteWristRef.current;
-      if (roleRef.current === 'RECEIVER') vto?.setPositionAnchor(landmarkWrist);
+      // Retain the Google landmark before fusion so one missed inference does
+      // not disable the VTO position/scale correction for the whole frame.
+      const positionHeld = wristRetentionRef.current.update(landmarkWrist, now);
+      if (roleRef.current === 'RECEIVER') vto?.setPositionAnchor(positionHeld.value);
+      const vtoWrist = vto?.getAnchor() ?? null;
       const localWrist = roleRef.current === 'RECEIVER'
-        ? fuseWristAnchors(landmarkWrist, vto?.getAnchor() ?? null)
-        : remoteWristRef.current;
-      const wristCandidate = localWrist;
-      const wristHeld = wristRetentionRef.current.update(wristCandidate, now);
-      const trackedWrist = wristHeld.value;
+        ? fuseWristAnchors(positionHeld.value, vtoWrist)
+        : positionHeld.value;
+      const trackedWrist = localWrist;
+      const wristHeld = { ...positionHeld, value: trackedWrist };
       const handAlpha = handFadeStartRef.current === null
         ? 1
         : Math.max(0, 1 - (now - handFadeStartRef.current) / 520);

@@ -59,34 +59,43 @@ export class FaceRetention extends BaseRetention<FaceAnchor> {
 }
 
 export class WristRetention extends BaseRetention<WristAnchor> {
+  constructor() {
+    // Wrist AR should bridge a short landmark miss instead of blinking off,
+    // while still expiring quickly when the hand actually leaves the frame.
+    super(450, 750);
+  }
+
   protected override blend(from: WristAnchor, to: WristAnchor, t: number): WristAnchor {
+    // The underlying One Euro filters already remove jitter. A more responsive
+    // blend here avoids adding a second visible layer of tracking lag.
+    const amount = t < .2 ? .32 : .68;
     const vec3 = (previous: WristAnchor['palmNormal'], next: WristAnchor['palmNormal']) => {
       if (!next) return previous;
       if (!previous) return next;
       const dot = previous.x * next.x + previous.y * next.y + previous.z * next.z;
       const sign = dot < 0 ? -1 : 1;
       const value = {
-        x: lerp(previous.x, next.x * sign, t),
-        y: lerp(previous.y, next.y * sign, t),
-        z: lerp(previous.z, next.z * sign, t),
+        x: lerp(previous.x, next.x * sign, amount),
+        y: lerp(previous.y, next.y * sign, amount),
+        z: lerp(previous.z, next.z * sign, amount),
       };
       const length = Math.hypot(value.x, value.y, value.z) || 1;
       return { x: value.x / length, y: value.y / length, z: value.z / length };
     };
     return {
-      x: lerp(from.x, to.x, t),
-      y: lerp(from.y, to.y, t),
-      scale: lerp(from.scale, to.scale, t),
-      angle: wrappedAngleLerp(from.angle, to.angle, t),
+      x: lerp(from.x, to.x, amount),
+      y: lerp(from.y, to.y, amount),
+      scale: lerp(from.scale, to.scale, amount),
+      angle: wrappedAngleLerp(from.angle, to.angle, amount),
       confidence: to.confidence,
       forearmDirection: {
-        x: lerp(from.forearmDirection.x, to.forearmDirection.x, t),
-        y: lerp(from.forearmDirection.y, to.forearmDirection.y, t),
+        x: lerp(from.forearmDirection.x, to.forearmDirection.x, amount),
+        y: lerp(from.forearmDirection.y, to.forearmDirection.y, amount),
       },
-      wristWidth: to.wristWidth === undefined ? from.wristWidth : from.wristWidth === undefined ? to.wristWidth : lerp(from.wristWidth, to.wristWidth, t),
+      wristWidth: to.wristWidth === undefined ? from.wristWidth : from.wristWidth === undefined ? to.wristWidth : lerp(from.wristWidth, to.wristWidth, amount),
       palmNormal: vec3(from.palmNormal, to.palmNormal),
       handDirection: vec3(from.handDirection, to.handDirection),
-      dorsalFacing: to.dorsalFacing === undefined ? from.dorsalFacing : from.dorsalFacing === undefined ? to.dorsalFacing : lerp(from.dorsalFacing, to.dorsalFacing, t),
+      dorsalFacing: to.dorsalFacing === undefined ? from.dorsalFacing : from.dorsalFacing === undefined ? to.dorsalFacing : lerp(from.dorsalFacing, to.dorsalFacing, amount),
     };
   }
 }

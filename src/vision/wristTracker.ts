@@ -58,10 +58,10 @@ export class WristTracker {
       if (separation < closestDistance) { closestDistance = separation; handIndex = index; }
     });
     const forearmLength = distance(wrist, elbow);
-    if (handIndex < 0 || closestDistance > Math.max(.13, forearmLength * .9)) return { anchor: null, landmarks };
-    const imageHand = handResult.landmarks?.[handIndex];
-    const worldHand = handResult.worldLandmarks?.[handIndex];
-    const handScore = handResult.handednesses?.[handIndex]?.[0]?.score ?? 0;
+    const handAssociated = handIndex >= 0 && closestDistance <= Math.max(.13, forearmLength * .9);
+    const imageHand = handAssociated ? handResult.landmarks?.[handIndex] : undefined;
+    const worldHand = handAssociated ? handResult.worldLandmarks?.[handIndex] : undefined;
+    const handScore = handAssociated ? handResult.handednesses?.[handIndex]?.[0]?.score ?? 0 : 0;
     const direction = normalize({ x: wrist.x - elbow.x, y: wrist.y - elbow.y });
     const angle = Math.atan2(direction.y, direction.x) + Math.PI / 2;
     const poseConfidence = Math.min(rawWrist.visibility ?? 0.75, rawElbow.visibility ?? 0.75);
@@ -86,8 +86,13 @@ export class WristTracker {
         dorsalFacing = clamp(.5 - palmNormal.z * 2.35, 0, 1);
       }
     }
-    const associationConfidence = clamp(1 - closestDistance / Math.max(.13, forearmLength * .9), 0, 1);
-    const confidence = clamp(poseConfidence * .45 + handScore * .24 + associationConfidence * .2 + clamp(forearmLength / .16, 0, 1) * .11, 0, 1);
+    const associationConfidence = handAssociated
+      ? clamp(1 - closestDistance / Math.max(.13, forearmLength * .9), 0, 1)
+      : 0;
+    const sizeConfidence = clamp(forearmLength / .16, 0, 1);
+    const confidence = handAssociated
+      ? clamp(poseConfidence * .45 + handScore * .24 + associationConfidence * .2 + sizeConfidence * .11, 0, 1)
+      : clamp(poseConfidence * .78 + sizeConfidence * .12, 0, .88);
     return { landmarks, anchor: {
       x: this.xFilter.filter(imageHand?.[0]?.x ?? wrist.x, now),
       y: this.yFilter.filter(imageHand?.[0]?.y ?? wrist.y, now),
