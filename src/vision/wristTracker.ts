@@ -3,15 +3,13 @@ import type { Vec3, WristAnchor } from '../types/vision';
 import { clamp, distance, normalize } from './math';
 import { LandmarkSmoother, OneEuroFilter, RateMeter } from './smoothing';
 import { createHandLandmarker, createPoseLandmarker } from './modelFactory';
+import { estimateRightWristPose, RightWristPoseStabilizer } from './wristPose';
 
 const RIGHT_ELBOW = 14;
 const RIGHT_WRIST = 16;
 const INDEX_MCP = 5;
 const MIDDLE_MCP = 9;
 const PINKY_MCP = 17;
-const sub = (a: Vec3, b: Vec3): Vec3 => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z });
-const cross = (a: Vec3, b: Vec3): Vec3 => ({ x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x });
-const unit3 = (v: Vec3): Vec3 => { const length = Math.hypot(v.x, v.y, v.z) || 1; return { x: v.x / length, y: v.y / length, z: v.z / length }; };
 
 /** Fuses right-forearm pose with right-hand world landmarks for wrist roll and size. */
 export class WristTracker {
@@ -26,6 +24,7 @@ export class WristTracker {
   private readonly angleFilter = new OneEuroFilter(1.1, 0.035);
   private readonly widthFilter = new OneEuroFilter(1.0, 0.04);
   private readonly facingFilter = new OneEuroFilter(1.0, 0.035);
+  private readonly wristPose = new RightWristPoseStabilizer();
   readonly rate = new RateMeter();
 
   async init() {
@@ -61,6 +60,7 @@ export class WristTracker {
     const forearmLength = distance(wrist, elbow);
     if (handIndex < 0 || closestDistance > Math.max(.13, forearmLength * .9)) return { anchor: null, landmarks };
     const imageHand = handResult.landmarks?.[handIndex];
+    const worldHand = handResult.worldLandmarks?.[handIndex];
     const handScore = handResult.handednesses?.[handIndex]?.[0]?.score ?? 0;
     const direction = normalize({ x: wrist.x - elbow.x, y: wrist.y - elbow.y });
     const angle = Math.atan2(direction.y, direction.x) + Math.PI / 2;
@@ -76,16 +76,15 @@ export class WristTracker {
       // when a side-facing fist foreshortens the index-to-pinky distance.
       wristWidth = clamp(Math.max(acrossPalm, palmLength, forearmLength * .31), .03, .14);
     }
-    if (imageHand?.[0] && imageHand?.[INDEX_MCP] && imageHand?.[PINKY_MCP] && imageHand?.[MIDDLE_MCP]) {
-      // Image-space 3D landmarks keep X/Y in the exact coordinate system sent
-      // over WebRTC. This avoids mixing the world-landmark Y axis with video X/Y.
-      const side = sub(imageHand[PINKY_MCP], imageHand[INDEX_MCP]);
-      const forward = sub(imageHand[MIDDLE_MCP], imageHand[0]);
-      palmNormal = unit3(cross(side, forward));
-      handDirection = unit3(forward);
-      // MediaPipe z becomes smaller toward the camera. For a physical right hand,
-      // the cross product is negative when the knuckle/back side faces the lens.
-      dorsalFacing = clamp(0.5 - palmNormal.z * 2.2, 0, 1);
+    if (imageHand && worldHand) {
+      const estimated = estimateRightWristPose(worldHand);
+      if (estimated) {
+        const stable = this.wristPose.update(estimated, imageHand, now);
+        palmNormal = stable.dorsal;
+        handDirection = stable.axis;
+        // MediaPipe world Z points away from the viewer; negative is closer.
+        dorsalFacing = clamp(.5 - palmNormal.z * 2.35, 0, 1);
+      }
     }
     const associationConfidence = clamp(1 - closestDistance / Math.max(.13, forearmLength * .9), 0, 1);
     const confidence = clamp(poseConfidence * .45 + handScore * .24 + associationConfidence * .2 + clamp(forearmLength / .16, 0, 1) * .11, 0, 1);
@@ -101,6 +100,6 @@ export class WristTracker {
 
   close() {
     this.pose?.close(); this.hand?.close(); this.pose = null; this.hand = null;
-    this.smoother.clear(); this.rate.reset();
+    this.smoother.clear(); this.wristPose.reset(); this.rate.reset();
   }
 }

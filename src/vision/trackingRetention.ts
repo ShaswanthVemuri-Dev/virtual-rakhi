@@ -63,7 +63,15 @@ export class WristRetention extends BaseRetention<WristAnchor> {
     const vec3 = (previous: WristAnchor['palmNormal'], next: WristAnchor['palmNormal']) => {
       if (!next) return previous;
       if (!previous) return next;
-      return { x: lerp(previous.x, next.x, t), y: lerp(previous.y, next.y, t), z: lerp(previous.z, next.z, t) };
+      const dot = previous.x * next.x + previous.y * next.y + previous.z * next.z;
+      const sign = dot < 0 ? -1 : 1;
+      const value = {
+        x: lerp(previous.x, next.x * sign, t),
+        y: lerp(previous.y, next.y * sign, t),
+        z: lerp(previous.z, next.z * sign, t),
+      };
+      const length = Math.hypot(value.x, value.y, value.z) || 1;
+      return { x: value.x / length, y: value.y / length, z: value.z / length };
     };
     return {
       x: lerp(from.x, to.x, t),

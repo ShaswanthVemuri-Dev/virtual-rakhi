@@ -14,6 +14,7 @@ export class Rakhi3DRenderer {
   private attachedPendant: THREE.Object3D;
   private carried: THREE.Group;
   private readonly smoothedSurface = new THREE.Vector3(0, 0, 1);
+  private readonly smoothedAxis = new THREE.Vector3(0, -1, 0);
   private hasSurface = false;
   private width = 1;
   private height = 1;
@@ -41,20 +42,20 @@ export class Rakhi3DRenderer {
     this.scene.add(this.attached, this.carried);
   }
 
-  private materials() {
-    const overlay = { depthTest: false, depthWrite: false } as const;
+  private materials(overlay = false) {
+    const depth = overlay ? { depthTest: false, depthWrite: false } as const : { depthTest: true, depthWrite: true } as const;
     return {
       red: new THREE.MeshStandardMaterial({ color: 0xa91f2c, roughness: .62, metalness: .03 }),
       saffron: new THREE.MeshStandardMaterial({ color: 0xe3a625, roughness: .54, metalness: .12 }),
-      petal: new THREE.MeshPhysicalMaterial({ color: 0xa7192f, roughness: .35, metalness: .13, clearcoat: .48, clearcoatRoughness: .28, side: THREE.DoubleSide, ...overlay }),
-      gold: new THREE.MeshPhysicalMaterial({ color: 0xe8ad2d, roughness: .28, metalness: .58, clearcoat: .34, side: THREE.DoubleSide, ...overlay }),
-      ruby: new THREE.MeshPhysicalMaterial({ color: 0x75152a, roughness: .2, metalness: .2, clearcoat: .72, side: THREE.DoubleSide, ...overlay }),
+      petal: new THREE.MeshPhysicalMaterial({ color: 0xa7192f, roughness: .35, metalness: .13, clearcoat: .48, clearcoatRoughness: .28, side: THREE.DoubleSide, ...depth }),
+      gold: new THREE.MeshPhysicalMaterial({ color: 0xe8ad2d, roughness: .28, metalness: .58, clearcoat: .34, side: THREE.DoubleSide, ...depth }),
+      ruby: new THREE.MeshPhysicalMaterial({ color: 0x75152a, roughness: .2, metalness: .2, clearcoat: .72, side: THREE.DoubleSide, ...depth }),
     };
   }
 
   /** One unified multicolour flower: one petal body with a nested gold/ruby centre. */
   private buildFlower(faceCamera = false): THREE.Group {
-    const material = this.materials();
+    const material = this.materials(faceCamera);
     const outline = new THREE.Shape();
     const points = 96;
     for (let index = 0; index <= points; index += 1) {
@@ -147,9 +148,14 @@ export class Rakhi3DRenderer {
     const x = (mirrored ? 1 - anchorX : anchorX) * this.width;
     const y = anchorY * this.height;
     const widthPx = Math.max(42, (anchor.wristWidth ?? anchor.scale * .42) * this.width);
-    const axis = new THREE.Vector3(mirrored ? -direction.x : direction.x, direction.y, 0).normalize();
+    const measuredAxis = anchor.handDirection
+      ? new THREE.Vector3(mirrored ? -anchor.handDirection.x : anchor.handDirection.x, anchor.handDirection.y, -anchor.handDirection.z)
+      : new THREE.Vector3(mirrored ? -direction.x : direction.x, direction.y, 0);
+    if (measuredAxis.lengthSq() < .2) measuredAxis.set(mirrored ? -direction.x : direction.x, direction.y, 0);
+    measuredAxis.normalize();
+    const fallbackAxis = new THREE.Vector3(mirrored ? -direction.x : direction.x, direction.y, 0).normalize();
     const fallbackFacing = THREE.MathUtils.clamp(anchor.dorsalFacing ?? .7, 0, 1);
-    const fallbackAcross = new THREE.Vector3(-axis.y, axis.x, 0);
+    const fallbackAcross = new THREE.Vector3(-fallbackAxis.y, fallbackAxis.x, 0);
     const fallbackRoll = (fallbackFacing - .5) * Math.PI;
     const measuredSurface = anchor.palmNormal
       ? new THREE.Vector3(mirrored ? -anchor.palmNormal.x : anchor.palmNormal.x, anchor.palmNormal.y, -anchor.palmNormal.z)
@@ -158,18 +164,24 @@ export class Rakhi3DRenderer {
     // Project the anatomical knuckle-side normal away from the forearm. This
     // produces a real bracelet basis in face-on, edge-on and palm-side poses.
     // Mirroring is applied once to X only.
-    measuredSurface.addScaledVector(axis, -measuredSurface.dot(axis));
+    measuredSurface.addScaledVector(measuredAxis, -measuredSurface.dot(measuredAxis));
     if (measuredSurface.lengthSq() < .04) measuredSurface.copy(fallbackAcross).setZ(Math.sin(fallbackRoll));
     measuredSurface.normalize();
     if (!this.hasSurface) {
       this.smoothedSurface.copy(measuredSurface);
+      this.smoothedAxis.copy(measuredAxis);
       this.hasSurface = true;
     } else {
-      // Reject a one-frame 180° normal flip near an edge-on wrist.
+      // A real wrist cannot invert either anatomical axis in one frame.
       if (this.smoothedSurface.dot(measuredSurface) < -.35) measuredSurface.multiplyScalar(-1);
+      if (this.smoothedAxis.dot(measuredAxis) < -.35) measuredAxis.multiplyScalar(-1);
       this.smoothedSurface.lerp(measuredSurface, .24).normalize();
+      this.smoothedAxis.lerp(measuredAxis, .3).normalize();
     }
-    const surface = this.smoothedSurface;
+    const axis = this.smoothedAxis;
+    const surface = this.smoothedSurface.clone().addScaledVector(axis, -this.smoothedSurface.dot(axis)).normalize();
+    // Recompute the radial vector after mirror/depth conversion. This restores
+    // a proper right-handed basis instead of reflecting a quaternion.
     const crossWrist = surface.clone().cross(axis).normalize();
     const correctedSurface = axis.clone().cross(crossWrist).normalize();
     const basis = new THREE.Matrix4().makeBasis(crossWrist, correctedSurface, axis);
