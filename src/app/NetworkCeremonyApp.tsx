@@ -73,7 +73,7 @@ export default function NetworkCeremonyApp() {
   const tilakStartRef = useRef<number | null>(null);
   const faceStableSinceRef = useRef<number | null>(null);
   const sessionStartAtRef = useRef(0);
-  const sessionDurationRef = useRef(30 * 60);
+  const sessionDurationRef = useRef(20 * 60);
   const lastUiRef = useRef(0);
   const lastAnchorSendRef = useRef(0);
   const lastStateSendRef = useRef(0);
@@ -89,7 +89,6 @@ export default function NetworkCeremonyApp() {
   const [connectionState, setConnectionState] = useState<ConnectionState>('OFF');
   const [frame, setFrame] = useState<Phase1Frame>(EMPTY_FRAME);
   const [remaining, setRemaining] = useState(() => parseCallDurationSeconds());
-  const [sessionDuration, setSessionDuration] = useState(() => parseCallDurationSeconds());
   const [activeRitual, setActiveRitualState] = useState<ActiveRitual>(null);
   const [aartiComplete, setAartiComplete] = useState(false);
   const [tilakApplied, setTilakAppliedState] = useState(false);
@@ -253,7 +252,6 @@ export default function NetworkCeremonyApp() {
       setIsHost(hosting);
       setRoomCode(code);
       sessionDurationRef.current = totalDuration;
-      setSessionDuration(totalDuration);
       window.history.replaceState(null, '', window.location.pathname);
       const peer = setupPeer();
       if (hosting) {
@@ -353,7 +351,6 @@ export default function NetworkCeremonyApp() {
         setRole(message.role);
         sessionStartAtRef.current = message.startAt;
         sessionDurationRef.current = message.duration;
-        setSessionDuration(message.duration);
         setRemaining(message.duration);
         setSessionState('ACTIVE');
         setNotice(`Call ready. Talk normally or wait for the giver to begin.`);
@@ -377,7 +374,7 @@ export default function NetworkCeremonyApp() {
       case 'BLESSING': showBlessing(message.target); setNotice('A blessing arrived.'); break;
       case 'MEDIA_STATE': break;
       case 'TIMER_SYNC': setRemaining((current) => Math.abs(current - message.remaining) > 1 ? message.remaining : current); break;
-      case 'CALL_END': finishFromRemote(message.reason === 'TIMER' ? 'The 30-minute call ended.' : 'The other participant ended the call.'); break;
+      case 'CALL_END': finishFromRemote(message.reason === 'TIMER' ? 'The 20-minute call ended.' : 'The other participant ended the call.'); break;
       case 'PING': send({ type: 'PONG', timestamp: message.timestamp }); break;
       default: break;
     }
@@ -555,7 +552,7 @@ export default function NetworkCeremonyApp() {
             }}>Join meeting</button>
           </div>
           {error && <div className="error-banner">{error}</div>}
-          <small>Works on current desktop browsers and iPad Safari · Two people · Up to 30 minutes</small>
+          <small>Works on current desktop browsers and iPad Safari · Two people · Up to 20 minutes</small>
         </div>
         {roleModal && <div className="role-modal" role="dialog" aria-modal="true" aria-labelledby="role-title"><div className="role-dialog">
           <button className="modal-close" aria-label="Close" onClick={() => setRoleModal(false)}>×</button>
@@ -603,7 +600,7 @@ export default function NetworkCeremonyApp() {
       <video ref={trackingVideoRef} className="tracking-video" playsInline muted />
       <div className="session-bar">
         <div><div className="room-code-chip"><span>Meeting code</span><strong>{roomCode}</strong><button className="icon-button compact" aria-label="Copy meeting code" title="Copy meeting code" onClick={() => void navigator.clipboard.writeText(roomCode)}><Copy01 size={17} aria-hidden="true" /></button></div><small className="role-label">{role === 'GIVER' ? 'Sister · tying Rakhi' : 'Brother · receiving Rakhi'}</small></div>
-        <div className="session-actions"><Timer remaining={remaining} total={sessionDuration} /><button className="icon-button hang-up" aria-label="End call" title="End call" onClick={endSession}><PhoneCall02 size={21} aria-hidden="true" /></button></div>
+        <div className="session-actions"><Timer remaining={remaining} /><button className="icon-button hang-up" aria-label="End call" title="End call" onClick={endSession}><PhoneCall02 size={21} aria-hidden="true" /></button></div>
       </div>
       {microphoneWarning && <div className="warning-banner compact-warning"><strong>Video-only:</strong> {microphoneWarning}</div>}
       {error && <div className="error-banner">{error}</div>}
@@ -630,7 +627,7 @@ export default function NetworkCeremonyApp() {
           <div className="call-notice" role="status">{notice}</div>
           {activeRitual === 'RAKHI' && role === 'RECEIVER' && <WristPoseGuide />}
           <CeremonyGuide activeRitual={activeRitual} rakhiState={rakhiState} instruction={activeRitual === 'AARTI' ? 'Aarti is moving in three gentle clockwise circles.' : activeRitual === 'TILAK' ? tilakFlow === 'WAIT_FACE' ? 'Look toward the camera and hold still for a moment.' : 'The Tilak is being applied.' : rakhiInstruction} progress={rakhiProgress} status={guideStatus} nextStep={!aartiComplete ? role === 'GIVER' ? 'Begin with Aarti.' : 'Your sister will begin with Aarti.' : !tilakApplied ? role === 'GIVER' ? 'Apply the Tilak.' : 'Look toward the camera for the Tilak.' : !rakhiAttached ? role === 'GIVER' ? 'Choose Rakhi and bring both hands into view.' : 'Raise your right fist with the knuckle side toward the camera.' : 'If you are the elder sibling, offer a blessing.'} />
-          <div className="ceremony-rules"><div className="guide-kicker">CALL NOTES</div><ul><li>The Rakhi attaches only to the brother’s right wrist.</li><li>Keep the wrist visible after tying so the 3D Rakhi can follow it.</li><li>The call ends after 30 minutes. No camera frames are stored.</li></ul></div>
+          <div className="ceremony-rules"><div className="guide-kicker">CALL NOTES</div><ul><li>The Rakhi attaches only to the brother’s right wrist.</li><li>Keep the wrist visible after tying so the Rakhi can follow it.</li><li>The call ends after 20 minutes. No camera frames are stored.</li></ul></div>
         </aside>
       </div>
     </section>

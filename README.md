@@ -8,7 +8,7 @@ A deployable two-person Raksha Bandhan ceremony built with React, WebRTC, MediaP
 - Peer-to-peer video/audio and synchronized ceremony state.
 - Female/giver and male/receiver interfaces selected before camera access.
 - Sequential controls: Aarti → Tilak → Rakhi → Blessing.
-- A 30-minute synchronized call timer.
+- A 20-minute synchronized call timer.
 - Local-only MediaPipe tracking; frames are not uploaded or stored.
 - Right-hand world landmarks fused with the forearm pose for wrist size, roll and orientation.
 - A single purpose-built procedural 3D Rakhi with wrist-sized thread, flower pendant, roll-aware orientation, and depth-only wrist occlusion.

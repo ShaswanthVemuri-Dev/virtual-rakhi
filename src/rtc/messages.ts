@@ -2,7 +2,7 @@ import type { FaceAnchor, NormalizedHand, WristAnchor } from '../types/vision';
 import type { CeremonyRole } from '../app/ceremonyState';
 import type { RakhiTyingState } from '../rakhi/tyingStateMachine';
 
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 export type CeremonyMessage =
   | { type: 'ROLE_SELECTED'; role: CeremonyRole }
@@ -49,7 +49,7 @@ export const isCeremonyMessage = (value: unknown): value is CeremonyMessage => {
   switch (message.type) {
     case 'ROLE_SELECTED': return message.role === 'GIVER' || message.role === 'RECEIVER';
     case 'ROLE_CONFLICT': return message.requiredRole === 'GIVER' || message.requiredRole === 'RECEIVER';
-    case 'SESSION_INIT': return (message.role === 'GIVER' || message.role === 'RECEIVER') && finite(message.startAt) && finite(message.duration) && message.duration >= 30 && message.duration <= 1800 && finite(message.version);
+    case 'SESSION_INIT': return (message.role === 'GIVER' || message.role === 'RECEIVER') && finite(message.startAt) && finite(message.duration) && message.duration >= 30 && message.duration <= 1200 && finite(message.version);
     case 'FACE_ANCHOR': return anchor(message.payload, true);
     case 'WRIST_ANCHOR': return anchor(message.payload, false);
     case 'GIVER_HANDS': return Array.isArray(message.payload) && message.payload.length <= 2 && message.payload.every((hand) => {
@@ -63,7 +63,7 @@ export const isCeremonyMessage = (value: unknown): value is CeremonyMessage => {
         && candidate.localLandmarks.length === 21 && candidate.localLandmarks.every((landmark) => point(landmark) && finite((landmark as Record<string, unknown>).z));
     });
     case 'RAKHI_STATE': return typeof message.state === 'string' && rakhiStates.has(message.state) && typeof message.instruction === 'string' && message.instruction.length <= 180 && finite(message.progress) && message.progress >= 0 && message.progress <= 1;
-    case 'TIMER_SYNC': return finite(message.remaining) && message.remaining >= 0 && message.remaining <= 1800 && timed();
+    case 'TIMER_SYNC': return finite(message.remaining) && message.remaining >= 0 && message.remaining <= 1200 && timed();
     case 'MEDIA_STATE': return typeof message.audio === 'boolean' && typeof message.video === 'boolean';
     case 'CALL_END': return timed() && (message.reason === 'MANUAL' || message.reason === 'TIMER' || message.reason === 'DISCONNECT');
     case 'BLESSING': return timed() && (message.target === 'GIVER' || message.target === 'RECEIVER');

@@ -25,8 +25,8 @@ export const parseCallDurationSeconds = () => {
   const querySeconds = query ? Number(query) : Number.NaN;
   const envSeconds = Number(import.meta.env.VITE_DEBUG_CALL_DURATION ?? Number.NaN);
   const chosen = Number.isFinite(querySeconds) ? querySeconds : envSeconds;
-  if (Number.isFinite(chosen) && chosen >= 30 && chosen <= 1800) return Math.floor(chosen);
-  return 30 * 60;
+  if (Number.isFinite(chosen) && chosen >= 30 && chosen <= 1200) return Math.floor(chosen);
+  return 20 * 60;
 };
 
 export const formatDuration = (seconds: number) => {

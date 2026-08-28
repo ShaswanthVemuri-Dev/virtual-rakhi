@@ -80,9 +80,9 @@ h2 { margin: 8px 0 12px; font-size: clamp(28px, 4vw, 42px); }
 .icon-button.compact { width: 32px; min-width: 32px; height: 32px; min-height: 32px; border-radius: 8px; background: var(--red); }
 .connection-chip { padding: 5px 9px; border: 1px solid var(--line); border-radius: 99px; color: var(--muted); font-size: 9px; font-weight: 600; letter-spacing: .08em; }
 .connection-chip.connected { color: #29613e; border-color: #9bc7aa; background: #e5f3e9; }
-.ceremony-timer { display: grid; grid-template-columns: auto auto; align-items: center; column-gap: 7px; min-height: 44px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 11px; background: var(--paper); }
-.ceremony-timer span, .ceremony-timer em { color: var(--muted); font-size: 8px; font-style: normal; letter-spacing: .1em; }
-.ceremony-timer strong { grid-row: span 2; font-size: 19px; font-weight: 400; font-variant-numeric: tabular-nums; }
+.ceremony-timer { display: flex; align-items: center; gap: 9px; min-height: 44px; padding: 5px 11px; border: 1px solid var(--line); border-radius: 11px; background: var(--paper); }
+.ceremony-timer span { color: var(--muted); font-size: 10px; font-weight: 400; white-space: nowrap; }
+.ceremony-timer strong { font-size: 19px; font-weight: 400; font-variant-numeric: tabular-nums; }
 .ceremony-grid { display: grid; flex: 1; grid-template-columns: minmax(0, 1fr) 300px; gap: 14px; min-height: 0; align-items: stretch; }
 .ceremony-stage-card, .ceremony-guide, .ceremony-rules, .wrist-pose-guide { background: var(--paper); border: 1px solid var(--line); border-radius: 18px; }
 .ceremony-stage-card { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
