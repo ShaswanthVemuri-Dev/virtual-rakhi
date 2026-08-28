@@ -6,6 +6,8 @@ export interface MediaAcquireResult {
 const videoConstraints: MediaTrackConstraints = {
   width: { ideal: 1280 },
   height: { ideal: 720 },
+  aspectRatio: { ideal: 16 / 9 },
+  facingMode: 'user',
   frameRate: { ideal: 30, max: 30 },
 };
 

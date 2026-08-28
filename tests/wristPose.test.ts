@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Vec3 } from '../src/types/vision';
 import { estimateRightWristPose, fuseWristAnchors, RightWristPoseStabilizer } from '../src/vision/wristPose';
+import { chooseRightHandIndex } from '../src/vision/wristTracker';
 
 const hand = (transform: (point: Vec3) => Vec3 = (point) => point) => {
   const points = Array.from({ length: 21 }, () => ({ x: 0, y: 0, z: 0 }));
@@ -19,6 +20,13 @@ const rotateX = (angle: number) => (point: Vec3): Vec3 => ({
 });
 
 describe('right wrist surface pose', () => {
+  it('keeps close-range hand tracking when the full-body pose disappears', () => {
+    const closeHand = hand((point) => ({ x: point.x + .72, y: point.y + .42, z: point.z }));
+    expect(chooseRightHandIndex([closeHand], null, null)).toBe(0);
+    const otherHand = hand((point) => ({ x: point.x + .2, y: point.y + .42, z: point.z }));
+    expect(chooseRightHandIndex([otherHand, closeHand], null, { x: .72, y: .47, z: 0 })).toBe(1);
+  });
+
   it('uses landmark translation while preserving the VTO screen rotation', () => {
     const position = { x: .62, y: .41, scale: .2, angle: 0, confidence: .8, forearmDirection: { x: 0, y: -1 }, palmNormal: { x: 0, y: 0, z: -1 } };
     const rotation = { x: .2, y: .3, scale: .12, angle: 1.2, confidence: .9, forearmDirection: { x: 1, y: 0 } };
@@ -27,6 +35,13 @@ describe('right wrist surface pose', () => {
     expect(fused?.scale).toBe(.2);
     expect(fused?.angle).toBe(1.2);
     expect(fused?.palmNormal?.z).toBe(-1);
+  });
+
+  it('does not declare the wrist ready until both trackers agree', () => {
+    const position = { x: .62, y: .41, scale: .2, angle: 0, confidence: .8, forearmDirection: { x: 0, y: -1 } };
+    const rotation = { x: .2, y: .3, scale: .12, angle: 1.2, confidence: .9, forearmDirection: { x: 1, y: 0 } };
+    expect(fuseWristAnchors(position, null)).toBeNull();
+    expect(fuseWristAnchors(null, rotation)).toBeNull();
   });
 
   it('points the dorsal surface toward the camera for a visible knuckle plane', () => {

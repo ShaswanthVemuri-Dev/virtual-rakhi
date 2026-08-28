@@ -47,7 +47,11 @@ export const normalizeHands = (hands: TrackedHand[]): NormalizedHand[] => {
   });
 };
 
-/** Matches the mirrored self-preview the giver uses to guide her hands. */
+/**
+ * Canonical ceremony space: the receiver's unmirrored outgoing canvas.
+ * The giver contributes her mirrored self-preview coordinates; the receiver
+ * mirrors the complete overlay once only for his local selfie preview.
+ */
 export const mirrorHandsForCanvas = (hands: TrackedHand[]) => normalizeHands(hands.map((hand) => ({
   ...hand,
   landmarks: hand.landmarks.map((point) => ({ ...point, x: 1 - point.x })),
@@ -112,6 +116,13 @@ export const restoreHandsToCanvas = (hands: NormalizedHand[]) => hands.map((hand
   }));
 });
 
+export const handsHoldingRakhi = (hands: NormalizedHand[]) => hands.length === 2 && hands.every((hand) => {
+  const thumb = hand.localLandmarks[4];
+  const index = hand.localLandmarks[8];
+  return hand.confidence >= .6 && !!thumb && !!index
+    && Math.hypot(thumb.x - index.x, thumb.y - index.y, thumb.z - index.z) <= .42;
+});
+
 /** The on-screen Rakhi position shared by rendering and attachment logic. */
 export const rakhiPlacement = (hands: NormalizedHand[], wrist?: WristAnchor | null) => {
   if (hands.length !== 2) return null;
@@ -120,9 +131,13 @@ export const rakhiPlacement = (hands: NormalizedHand[], wrist?: WristAnchor | nu
     y: ((points[4]?.y ?? points[0].y) + (points[8]?.y ?? points[0].y)) / 2,
   }));
   const center = { x: (pinches[0].x + pinches[1].x) / 2, y: (pinches[0].y + pinches[1].y) / 2 };
+  const span = Math.hypot(pinches[1].x - pinches[0].x, pinches[1].y - pinches[0].y);
+  if (![center.x, center.y, span].every(Number.isFinite)
+    || center.x < 0 || center.x > 1 || center.y < 0 || center.y > 1
+    || span < .025 || span > .75) return null;
   return {
     center,
-    span: Math.hypot(pinches[1].x - pinches[0].x, pinches[1].y - pinches[0].y),
+    span,
     angle: Math.atan2(pinches[1].y - pinches[0].y, pinches[1].x - pinches[0].x),
     wristDistance: wrist ? Math.hypot(center.x - wrist.x, center.y - wrist.y) : Number.POSITIVE_INFINITY,
   };

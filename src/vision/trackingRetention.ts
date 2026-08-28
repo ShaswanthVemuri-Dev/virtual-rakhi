@@ -68,7 +68,9 @@ export class WristRetention extends BaseRetention<WristAnchor> {
   protected override blend(from: WristAnchor, to: WristAnchor, t: number): WristAnchor {
     // The underlying One Euro filters already remove jitter. A more responsive
     // blend here avoids adding a second visible layer of tracking lag.
-    const amount = t < .2 ? .32 : .68;
+    // WristTracker already applies One Euro filtering. Keep live translation
+    // responsive and blend only when reacquiring after a missed detection.
+    const amount = t < .2 ? .55 : 1;
     const vec3 = (previous: WristAnchor['palmNormal'], next: WristAnchor['palmNormal']) => {
       if (!next) return previous;
       if (!previous) return next;

@@ -11,12 +11,36 @@ const INDEX_MCP = 5;
 const MIDDLE_MCP = 9;
 const PINKY_MCP = 17;
 
-/** Fuses right-forearm pose with right-hand world landmarks for wrist roll and size. */
+/**
+ * Pose identifies the anatomical right side when it is visible. The last
+ * confirmed point preserves that association when a close wrist fills the
+ * frame and Pose temporarily disappears.
+ */
+export const chooseRightHandIndex = (hands: Vec3[][], poseWrist: Vec3 | null, previous: Vec3 | null) => {
+  if (!hands.length) return -1;
+  if (hands.length === 1) return 0;
+  const target = poseWrist ?? previous;
+  if (!target) return -1;
+  let selected = -1;
+  let closest = Number.POSITIVE_INFINITY;
+  hands.forEach((hand, index) => {
+    if (!hand[0]) return;
+    const separation = distance(hand[0], target);
+    if (separation < closest) { closest = separation; selected = index; }
+  });
+  return selected;
+};
+
+/** Google wrist translation plus the VTO renderer's independent 3D pose. */
 export class WristTracker {
   private pose: PoseLandmarker | null = null;
   private hand: HandLandmarker | null = null;
   private lastInference = -Infinity;
-  private readonly intervalMs = 1000 / 18;
+  private lastPoseInference = -Infinity;
+  private readonly intervalMs = 1000 / 24;
+  private readonly poseIntervalMs = 1000 / 6;
+  private poseLandmarks: Vec3[] = [];
+  private poseConfidence = 0;
   private readonly smoother = new LandmarkSmoother();
   private readonly xFilter = new OneEuroFilter(1.5, 0.05);
   private readonly yFilter = new OneEuroFilter(1.5, 0.05);
@@ -25,6 +49,8 @@ export class WristTracker {
   private readonly widthFilter = new OneEuroFilter(1.0, 0.04);
   private readonly facingFilter = new OneEuroFilter(1.0, 0.035);
   private readonly wristPose = new RightWristPoseStabilizer();
+  private lastRightPoint: Vec3 | null = null;
+  private lastDirection = { x: 0, y: -1 };
   readonly rate = new RateMeter();
 
   async init() {
@@ -34,37 +60,46 @@ export class WristTracker {
   async process(video: HTMLVideoElement, now: number): Promise<{ anchor: WristAnchor | null; landmarks: Vec3[] } | null> {
     if (!this.pose || !this.hand || now - this.lastInference < this.intervalMs || video.readyState < 2) return null;
     this.lastInference = now;
-    const poseResult = this.pose.detectForVideo(video, now);
+    if (now - this.lastPoseInference >= this.poseIntervalMs) {
+      this.lastPoseInference = now;
+      const poseResult = this.pose.detectForVideo(video, now);
+      const raw = poseResult.landmarks?.[0];
+      this.poseLandmarks = raw?.length
+        ? this.smoother.smooth('pose', raw.map((point) => ({ x: point.x, y: point.y, z: point.z })), now)
+        : [];
+      const rawWrist = raw?.[RIGHT_WRIST];
+      const rawElbow = raw?.[RIGHT_ELBOW];
+      this.poseConfidence = rawWrist && rawElbow
+        ? Math.min(rawWrist.visibility ?? .75, rawElbow.visibility ?? .75)
+        : 0;
+    }
     const handResult = this.hand.detectForVideo(video, now);
     this.rate.tick(now);
-    const raw = poseResult.landmarks?.[0];
-    if (!raw?.length) return { anchor: null, landmarks: [] };
-    const landmarks = this.smoother.smooth('pose', raw.map((p) => ({ x: p.x, y: p.y, z: p.z })), now);
-    const wrist = landmarks[RIGHT_WRIST];
-    const elbow = landmarks[RIGHT_ELBOW];
-    const rawWrist = raw[RIGHT_WRIST] as (typeof raw)[number] & { presence?: number };
-    const rawElbow = raw[RIGHT_ELBOW] as (typeof raw)[number] & { presence?: number };
-    if (!wrist || !elbow || !rawWrist || !rawElbow) return { anchor: null, landmarks };
+    const landmarks = this.poseLandmarks;
+    const poseWrist = landmarks[RIGHT_WRIST] ?? null;
+    const elbow = landmarks[RIGHT_ELBOW] ?? null;
 
-    // Pose landmarks provide the anatomical right wrist. Associate the closest
-    // detected hand with that point instead of trusting selfie handedness alone
-    // (which can flip when browsers mirror the preview).
+    // Crucially, a missing full-body pose no longer rejects a hand that the
+    // close-range Hand Landmarker still sees.
     const detectedHands = handResult.landmarks ?? [];
-    let handIndex = -1;
-    let closestDistance = Number.POSITIVE_INFINITY;
-    detectedHands.forEach((candidate, index) => {
-      if (!candidate?.[0]) return;
-      const separation = distance(candidate[0], wrist);
-      if (separation < closestDistance) { closestDistance = separation; handIndex = index; }
-    });
-    const forearmLength = distance(wrist, elbow);
-    const handAssociated = handIndex >= 0 && closestDistance <= Math.max(.13, forearmLength * .9);
-    const imageHand = handAssociated ? handResult.landmarks?.[handIndex] : undefined;
-    const worldHand = handAssociated ? handResult.worldLandmarks?.[handIndex] : undefined;
-    const handScore = handAssociated ? handResult.handednesses?.[handIndex]?.[0]?.score ?? 0 : 0;
-    const direction = normalize({ x: wrist.x - elbow.x, y: wrist.y - elbow.y });
+    const handIndex = chooseRightHandIndex(detectedHands, poseWrist, this.lastRightPoint);
+    const imageHand = handIndex >= 0 ? detectedHands[handIndex] : undefined;
+    const worldHand = handIndex >= 0 ? handResult.worldLandmarks?.[handIndex] : undefined;
+    const handScore = handIndex >= 0 ? handResult.handednesses?.[handIndex]?.[0]?.score ?? .75 : 0;
+    const wrist = imageHand?.[0] ?? poseWrist;
+    if (!wrist) return { anchor: null, landmarks };
+
+    const hasPose = !!poseWrist && !!elbow;
+    const forearmLength = hasPose
+      ? distance(poseWrist, elbow)
+      : imageHand?.[MIDDLE_MCP] ? distance(wrist, imageHand[MIDDLE_MCP]) * 1.7 : .12;
+    const direction = hasPose
+      ? normalize({ x: poseWrist.x - elbow.x, y: poseWrist.y - elbow.y })
+      : imageHand?.[MIDDLE_MCP]
+        ? normalize({ x: imageHand[MIDDLE_MCP].x - wrist.x, y: imageHand[MIDDLE_MCP].y - wrist.y })
+        : this.lastDirection;
+    this.lastDirection = direction;
     const angle = Math.atan2(direction.y, direction.x) + Math.PI / 2;
-    const poseConfidence = Math.min(rawWrist.visibility ?? 0.75, rawElbow.visibility ?? 0.75);
     let wristWidth = clamp(forearmLength * 0.4, 0.035, 0.11);
     let palmNormal: Vec3 = { x: 0, y: 0, z: 1 };
     let handDirection: Vec3 = { x: direction.x, y: direction.y, z: 0 };
@@ -86,16 +121,18 @@ export class WristTracker {
         dorsalFacing = clamp(.5 - palmNormal.z * 2.35, 0, 1);
       }
     }
-    const associationConfidence = handAssociated
-      ? clamp(1 - closestDistance / Math.max(.13, forearmLength * .9), 0, 1)
+    const reference = poseWrist ?? this.lastRightPoint;
+    const associationConfidence = imageHand
+      ? reference ? clamp(1 - distance(imageHand[0], reference) / .22, 0, 1) : .9
       : 0;
     const sizeConfidence = clamp(forearmLength / .16, 0, 1);
-    const confidence = handAssociated
-      ? clamp(poseConfidence * .45 + handScore * .24 + associationConfidence * .2 + sizeConfidence * .11, 0, 1)
-      : clamp(poseConfidence * .78 + sizeConfidence * .12, 0, .88);
+    const confidence = imageHand
+      ? clamp(handScore * .5 + associationConfidence * .3 + sizeConfidence * .2, 0, .98)
+      : clamp(this.poseConfidence * .78 + sizeConfidence * .12, 0, .88);
+    this.lastRightPoint = { x: wrist.x, y: wrist.y, z: wrist.z };
     return { landmarks, anchor: {
-      x: this.xFilter.filter(imageHand?.[0]?.x ?? wrist.x, now),
-      y: this.yFilter.filter(imageHand?.[0]?.y ?? wrist.y, now),
+      x: this.xFilter.filter(wrist.x, now),
+      y: this.yFilter.filter(wrist.y, now),
       scale: this.scaleFilter.filter(clamp(Math.max(forearmLength * 0.86, wristWidth * 2.1), 0.08, 0.3), now),
       angle: this.angleFilter.filter(angle, now), confidence, forearmDirection: direction,
       wristWidth: this.widthFilter.filter(wristWidth, now), palmNormal, handDirection,
@@ -106,5 +143,8 @@ export class WristTracker {
   close() {
     this.pose?.close(); this.hand?.close(); this.pose = null; this.hand = null;
     this.smoother.clear(); this.wristPose.reset(); this.rate.reset();
+    [this.xFilter, this.yFilter, this.scaleFilter, this.angleFilter, this.widthFilter, this.facingFilter].forEach((filter) => filter.reset());
+    this.lastRightPoint = null; this.lastDirection = { x: 0, y: -1 };
+    this.poseLandmarks = []; this.poseConfidence = 0; this.lastInference = this.lastPoseInference = -Infinity;
   }
 }

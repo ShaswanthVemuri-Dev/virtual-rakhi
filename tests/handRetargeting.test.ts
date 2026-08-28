@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mirrorHandsForCanvas, normalizeHands, pairGuideDistance, restoreHandsToCanvas, retargetHand } from '../src/rakhi/handRetargeting';
+import { handsHoldingRakhi, mirrorHandsForCanvas, normalizeHands, pairGuideDistance, rakhiPlacement, restoreHandsToCanvas, retargetHand } from '../src/rakhi/handRetargeting';
 import type { TrackedHand } from '../src/types/vision';
 
 const makeHand = (offsetX: number): TrackedHand => {
@@ -59,5 +59,28 @@ describe('hand normalization / retargeting', () => {
     const centered = normalizeHands([makeHand(0.42), makeHand(0.58)]);
     const offCenter = normalizeHands([makeHand(0.2), makeHand(0.36)]);
     expect(pairGuideDistance(centered)).toBeLessThan(pairGuideDistance(offCenter));
+  });
+
+  it('places and sizes the carried Rakhi directly from the two fingertip pinches', () => {
+    const hands = normalizeHands([makeHand(.25), makeHand(.75)]);
+    const restored = restoreHandsToCanvas(hands);
+    const pinch = (points: typeof restored[number]) => ({
+      x: (points[4].x + points[8].x) / 2,
+      y: (points[4].y + points[8].y) / 2,
+    });
+    const [left, right] = restored.map(pinch);
+    const placement = rakhiPlacement(hands);
+    expect(placement?.center.x).toBeCloseTo((left.x + right.x) / 2, 5);
+    expect(placement?.center.y).toBeCloseTo((left.y + right.y) / 2, 5);
+    expect(placement?.span).toBeCloseTo(Math.hypot(right.x - left.x, right.y - left.y), 5);
+  });
+
+  it('shows the carried Rakhi only for two valid pinches and rejects runaway spans', () => {
+    const hands = normalizeHands([makeHand(.35), makeHand(.65)]);
+    hands.forEach((current) => { current.localLandmarks[8] = { ...current.localLandmarks[4] }; });
+    expect(handsHoldingRakhi(hands)).toBe(true);
+    hands[0].localLandmarks[8].x += 1;
+    expect(handsHoldingRakhi(hands)).toBe(false);
+    expect(rakhiPlacement(normalizeHands([makeHand(.02), makeHand(.98)]))).toBeNull();
   });
 });

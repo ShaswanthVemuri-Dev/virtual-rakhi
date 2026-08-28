@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { publicUrl } from '../app/baseUrl';
 import type { NormalizedHand, WristAnchor } from '../types/vision';
 import type { RakhiTyingState } from '../rakhi/tyingStateMachine';
-import { rakhiPlacement } from '../rakhi/handRetargeting';
+import { handsHoldingRakhi, rakhiPlacement } from '../rakhi/handRetargeting';
 
 type DetectState = {
   isDetected: boolean;
@@ -49,8 +49,6 @@ const loadRuntime = () => runtimePromise ??= (async () => {
   }
 })();
 
-let modelPreload: Promise<unknown> | null = null;
-
 export const fitHybridWristScale = (vtoWidth: number, targetWidth: number, previous: number, ready: boolean) => {
   const measured = THREE.MathUtils.clamp(targetWidth / vtoWidth, .65, 1.55);
   return ready ? THREE.MathUtils.lerp(previous, measured, .24) : measured;
@@ -87,16 +85,6 @@ export class Rakhi3DRenderer {
   private disposed = false;
 
   constructor(private readonly canvas: HTMLCanvasElement) {}
-
-  preload() {
-    return Promise.all([
-      loadRuntime(),
-      modelPreload ??= fetch(publicUrl(`${BASE}/NN_WRIST_27.json`)).then((response) => {
-        if (!response.ok) throw new Error('Could not preload the wrist model.');
-        return response.text();
-      }),
-    ]).then(() => undefined);
-  }
 
   start(video: HTMLVideoElement) {
     if (this.disposed || video.readyState < 2) return Promise.resolve();
@@ -346,7 +334,7 @@ export class Rakhi3DRenderer {
   private updateVisibility() {
     if (!this.attached || !this.carried) return;
     this.attached.visible = !!this.anchor && (this.state === 'FINISHING_ANIMATION' || this.state === 'RAKHI_ATTACHED');
-    this.carried.visible = ['POSITIONING', 'APPROACHING_WRIST', 'ALIGNMENT_VALID'].includes(this.state) && this.hands.length === 2;
+    this.carried.visible = ['APPROACHING_WRIST', 'ALIGNMENT_VALID'].includes(this.state) && handsHoldingRakhi(this.hands);
   }
 
   private placeCarried() {
@@ -354,14 +342,18 @@ export class Rakhi3DRenderer {
     const placement = rakhiPlacement(this.hands);
     if (!placement) return;
     const camera = this.three.camera;
+    const span = THREE.MathUtils.clamp(placement.span, .08, .42);
+    // The carried Rakhi belongs to the shared screen plane, not the wrist's
+    // changing VTO depth. A fixed depth prevents perspective scale explosions.
+    const carriedDepth = .2;
     const screenToWorld = (x: number, y: number) =>
-      new THREE.Vector3(x * 2 - 1, 1 - y * 2, this.trackerDepth).unproject(camera);
+      new THREE.Vector3(x * 2 - 1, 1 - y * 2, carriedDepth).unproject(camera);
     const center = screenToWorld(placement.center.x, placement.center.y);
-    const edge = screenToWorld(placement.center.x + placement.span / 2, placement.center.y);
+    const edge = screenToWorld(placement.center.x + span / 2, placement.center.y);
     this.carried.position.copy(center);
     this.carried.quaternion.copy(camera.quaternion);
     this.carried.rotateZ(-placement.angle);
-    this.carried.scale.setScalar(THREE.MathUtils.clamp(center.distanceTo(edge) / 1.6, .03, 3));
+    this.carried.scale.setScalar(center.distanceTo(edge) / 1.6);
   }
 
   private sizeCanvases(notify: boolean) {

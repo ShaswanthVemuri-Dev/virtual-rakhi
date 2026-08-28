@@ -1,5 +1,5 @@
 import type { NormalizedHand, WristAnchor } from '../types/vision';
-import { rakhiPlacement } from './handRetargeting';
+import { handsHoldingRakhi, rakhiPlacement } from './handRetargeting';
 
 export type RakhiTyingState =
   | 'IDLE'
@@ -32,12 +32,6 @@ const copy: Record<RakhiTyingState, string> = {
   TYING_GESTURE: 'Attaching the Rakhi.',
   FINISHING_ANIMATION: 'The Rakhi is tying itself around his wrist. You can gently remove your hands.',
   RAKHI_ATTACHED: 'Rakhi attached.',
-};
-
-const pinching = (hand: NormalizedHand) => {
-  const thumb = hand.localLandmarks[4];
-  const index = hand.localLandmarks[8];
-  return !!thumb && !!index && Math.hypot(thumb.x - index.x, thumb.y - index.y, thumb.z - index.z) <= 0.42;
 };
 
 export class RakhiTyingMachine {
@@ -89,7 +83,7 @@ export class RakhiTyingMachine {
 
     const readyHands = hands.length === 2 && hands.every((hand) => hand.confidence >= .6);
     if (!readyHands) { this.setState('WAIT_FOR_GIVER_HANDS', now); return this.snapshot(); }
-    const holding = hands.every(pinching);
+    const holding = handsHoldingRakhi(hands);
     if (!holding) { this.setState('POSITIONING', now); return this.snapshot(); }
 
     const placement = wrist && rakhiPlacement(hands, wrist);

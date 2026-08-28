@@ -155,21 +155,10 @@ export default function NetworkCeremonyApp() {
       if (cancelled) return;
       renderer = new Renderer(canvas);
       rakhi3dRef.current = renderer;
-      if (tilakAppliedRef.current) void renderer.preload().catch((cause) => console.error(cause));
     });
     return () => { cancelled = true; renderer?.dispose(); rakhi3dRef.current = null; };
   }, [sessionState, role]);
 
-  useEffect(() => {
-    if (sessionState !== 'ACTIVE' || role !== 'RECEIVER' || !tilakApplied) return;
-    void Promise.all([
-      managerRef.current.preloadWrist(),
-      rakhi3dRef.current?.preload() ?? Promise.resolve(),
-    ]).catch((cause) => {
-      console.error(cause);
-      setError('Wrist tracking could not be prepared. Refresh the call and retry.');
-    });
-  }, [sessionState, role, tilakApplied]);
   useEffect(() => {
     preloadCeremonyAssets().then(() => setAssetsReady(true)).catch(() => setError('Call assets could not be loaded. Re-extract the complete ZIP and retry.'));
   }, []);
@@ -343,6 +332,7 @@ export default function NetworkCeremonyApp() {
   };
 
   const beginRemoteRakhi = () => {
+    remoteHandsRef.current = [];
     setGiverHandsActive(false);
     setActiveRitual('RAKHI');
     if (roleRef.current === 'GIVER') {
@@ -405,6 +395,7 @@ export default function NetworkCeremonyApp() {
       case 'GIVER_HANDS': remoteHandsRef.current = message.payload; break;
       case 'RAKHI_STATE':
         setRakhiState(message.state); setRakhiInstruction(message.instruction); setRakhiProgress(message.progress);
+        if (message.state === 'WAIT_FOR_RECEIVER_WRIST' || message.state === 'WAIT_FOR_GIVER_HANDS') remoteHandsRef.current = [];
         if (roleRef.current === 'GIVER') setNotice(message.instruction);
         break;
       case 'RAKHI_ATTACHED':
@@ -452,7 +443,7 @@ export default function NetworkCeremonyApp() {
       if (roleRef.current === 'RECEIVER' && local.faceAnchor) retainedTilakFaceRef.current = local.faceAnchor;
 
       const vto = rakhi3dRef.current;
-      if (roleRef.current === 'RECEIVER' && activeRitualRef.current === 'RAKHI' && vto && !vtoStartRef.current && wristTrackingVideo.readyState >= 2) {
+      if (roleRef.current === 'RECEIVER' && tilakFlowRef.current !== 'IDLE' && vto && !vtoStartRef.current && wristTrackingVideo.readyState >= 2) {
         vtoStartRef.current = true;
         void vto.start(wristTrackingVideo).then(() => setWristTrackerReady(true)).catch((cause) => {
           console.error(cause);
@@ -461,9 +452,11 @@ export default function NetworkCeremonyApp() {
         });
       }
       const landmarkWrist = roleRef.current === 'RECEIVER' ? local.wristAnchor : remoteWristRef.current;
-      // Retain the Google landmark before fusion so one missed inference does
-      // not disable the VTO position/scale correction for the whole frame.
-      const positionHeld = wristRetentionRef.current.update(landmarkWrist, now);
+      // Only the receiver smooths/retains the local landmark. Applying another
+      // retention pass after transmission made the sister's attachment test lag.
+      const positionHeld = roleRef.current === 'RECEIVER'
+        ? wristRetentionRef.current.update(landmarkWrist, now)
+        : { value: landmarkWrist, alpha: landmarkWrist ? 1 : 0, state: landmarkWrist ? 'LIVE' as const : 'HIDDEN' as const };
       if (roleRef.current === 'RECEIVER') vto?.setPositionAnchor(positionHeld.value);
       const vtoWrist = vto?.getAnchor() ?? null;
       const localWrist = roleRef.current === 'RECEIVER'

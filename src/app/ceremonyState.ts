@@ -15,8 +15,8 @@ export const deriveNetworkVisionFeatures = (
   state: CeremonyVisionState,
 ): VisionFeatures => ({
   face: role === 'RECEIVER' && state.faceActivated,
-  // Landmark translation complements the VTO tracker's 3D rotation.
-  wrist: role === 'RECEIVER' && state.rakhiState !== 'IDLE',
+  // Tilak activation also warms the receiver wrist tracker before Rakhi starts.
+  wrist: role === 'RECEIVER' && state.faceActivated,
   hands: role === 'GIVER' && state.giverHandsActive,
 });
 
