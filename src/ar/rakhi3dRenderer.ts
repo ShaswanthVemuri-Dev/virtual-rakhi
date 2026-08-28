@@ -59,6 +59,7 @@ export class Rakhi3DRenderer {
   private attached: THREE.Group | null = null;
   private carried: THREE.Group | null = null;
   private anchor: WristAnchor | null = null;
+  private lastTrackedAt = -Infinity;
   private hands: NormalizedHand[] = [];
   private state: RakhiTyingState = 'IDLE';
   private disposed = false;
@@ -83,15 +84,15 @@ export class Rakhi3DRenderer {
       NNsPaths: [publicUrl(`${BASE}/NN_WRIST_27.json`)],
       poseLandmarksLabels: ['wristBack', 'wristLeft', 'wristRight', 'wristPalm', 'wristPalmTop', 'wristBackTop', 'wristRightBottom', 'wristLeftBottom'],
       objectPointsPositionFactors: [1, 1.3, 1],
-      poseFilter: globals.PoseFlipFilter.instance({ startStabilizeCounter: 8 }),
+      poseFilter: globals.PoseFlipFilter.instance({ startStabilizeCounter: 4 }),
       landmarksStabilizerSpec: { minCutOff: .001, beta: 3, freqRange: [2, 144] },
       stabilizationSettings: { switchNNErrorThreshold: .5 },
-      scanSettings: { threshold: .88, translationScalingFactors: [.3, .3, 1] },
-      threshold: .88,
+      scanSettings: { threshold: .72, translationScalingFactors: [.3, .3, 1] },
+      threshold: .72,
       maxHandsDetected: 1,
       freeZRot: true,
       enableFlipObject: false,
-      hideTrackerIfDetectionLost: true,
+      hideTrackerIfDetectionLost: false,
       debugDisplayLandmarks: false,
       callbackTrack: (detectState: DetectState) => this.onTrack(detectState),
     });
@@ -199,12 +200,15 @@ export class Rakhi3DRenderer {
   }
 
   private onTrack(detectState: DetectState) {
-    const rightWrist = !!detectState.isDetected && detectState.detected >= .58 && detectState.isRightHand;
+    const now = performance.now();
+    const rightWrist = !!detectState.isDetected && detectState.isRightHand;
+    if (!detectState.isDetected && now - this.lastTrackedAt <= 700) return;
     if (!rightWrist || !this.three || !this.attached) {
       this.anchor = null;
       if (this.three?.trackersParent[0]) this.three.trackersParent[0].visible = false;
       return;
     }
+    this.lastTrackedAt = now;
     const parent = this.three.trackersParent[0];
     parent.visible = true;
     this.three.scene.updateMatrixWorld(true);

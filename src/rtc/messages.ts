@@ -2,7 +2,7 @@ import type { FaceAnchor, NormalizedHand, WristAnchor } from '../types/vision';
 import type { CeremonyRole } from '../app/ceremonyState';
 import type { RakhiTyingState } from '../rakhi/tyingStateMachine';
 
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 export type CeremonyMessage =
   | { type: 'ROLE_SELECTED'; role: CeremonyRole }

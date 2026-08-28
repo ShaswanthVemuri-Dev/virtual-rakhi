@@ -60,6 +60,10 @@ export class VisionManager {
     return { ...this.features };
   }
 
+  preloadHands() {
+    return this.hands.init();
+  }
+
   async process(video: HTMLVideoElement, now: number): Promise<Phase1Frame> {
     this.renderRate.tick(now);
     const jobs: Promise<void>[] = [];
