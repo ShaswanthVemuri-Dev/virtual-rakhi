@@ -1,5 +1,5 @@
 import type { NormalizedHand, WristAnchor } from '../types/vision';
-import { pairGuideDistance } from './handRetargeting';
+import { rakhiPlacement } from './handRetargeting';
 
 export type RakhiTyingState =
   | 'IDLE'
@@ -92,8 +92,9 @@ export class RakhiTyingMachine {
     const holding = hands.every(pinching);
     if (!holding) { this.setState('POSITIONING', now); return this.snapshot(); }
 
-    const distance = pairGuideDistance(hands);
-    if (distance > .125) { this.setState('APPROACHING_WRIST', now); return this.snapshot(); }
+    const placement = wrist && rakhiPlacement(hands, wrist);
+    const attachmentRadius = Math.max(.065, (wrist?.wristWidth ?? (wrist?.scale ?? .1) * .42) * 1.15);
+    if (!placement || placement.wristDistance > attachmentRadius) { this.setState('APPROACHING_WRIST', now); return this.snapshot(); }
 
     if (this.state !== 'ALIGNMENT_VALID') { this.setState('ALIGNMENT_VALID', now); return this.snapshot(); }
     if (now - this.stableSince >= 140) this.setState('FINISHING_ANIMATION', now);

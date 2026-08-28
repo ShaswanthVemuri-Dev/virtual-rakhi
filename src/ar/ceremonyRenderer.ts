@@ -1,7 +1,7 @@
 import type { FaceAnchor, NormalizedHand, Phase1Frame, WristAnchor } from '../types/vision';
 import type { Retained } from '../vision/trackingRetention';
 import type { RakhiTyingState } from '../rakhi/tyingStateMachine';
-import { retargetHand } from '../rakhi/handRetargeting';
+import { retargetHandsToWrist } from '../rakhi/handRetargeting';
 import { drawHandShadow } from './handShadowRenderer';
 import { TilakRenderer } from './tilakRenderer';
 import { AartiRenderer } from './aartiRenderer';
@@ -19,6 +19,7 @@ export interface CeremonyRenderOptions {
 
 const activeHandStates = new Set<RakhiTyingState>([
   'WAIT_FOR_GIVER_HANDS',
+  'POSITIONING',
   'APPROACHING_WRIST',
   'ALIGNMENT_VALID',
   'FINISHING_ANIMATION',
@@ -67,18 +68,9 @@ export class CeremonyRenderer {
     state: RakhiTyingState,
     mirrored: boolean,
   ) {
-    const targetScale = Math.max(0.045, wrist.scale * 0.42);
     const fade = state === 'FINISHING_ANIMATION' ? 0.2 : 0.48;
-    const retargeted = hands.map((hand) => {
-      const points = retargetHand(hand, {
-        x: wrist.x,
-        y: wrist.y,
-        palmScale: targetScale,
-        angle: wrist.angle - Math.PI / 2,
-        motionGain: 0.92,
-      });
+    retargetHandsToWrist(hands, wrist).forEach((points) => {
       drawHandShadow(ctx, points, { mirror: mirrored, alpha: fade });
-      return points;
     });
   }
 

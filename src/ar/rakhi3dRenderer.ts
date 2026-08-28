@@ -1,238 +1,287 @@
 import * as THREE from 'three';
-import type { NormalizedHand, Vec3, WristAnchor } from '../types/vision';
+import { publicUrl } from '../app/baseUrl';
+import type { NormalizedHand, WristAnchor } from '../types/vision';
 import type { RakhiTyingState } from '../rakhi/tyingStateMachine';
-import { retargetHand } from '../rakhi/handRetargeting';
+import { rakhiPlacement } from '../rakhi/handRetargeting';
 
-type BuiltRakhi = { root: THREE.Group; pendant: THREE.Object3D };
+type DetectState = {
+  isDetected: boolean;
+  detected: number;
+  isRightHand: boolean;
+};
 
-/** A purpose-built 3D Rakhi. No GLB, sprites, or overlapping 2D Rakhi artwork. */
+type VtoThree = {
+  renderer: THREE.WebGLRenderer;
+  scene: THREE.Scene;
+  camera: THREE.PerspectiveCamera;
+  trackersParent: THREE.Object3D[];
+};
+
+type VtoHelper = {
+  init(spec: Record<string, unknown>): Promise<VtoThree>;
+  resize(width: number, height: number): void;
+  add_threeObject(object: THREE.Object3D): void;
+  add_threeSoftOccluder(object: THREE.Mesh, radius: number, fade: number, debug: boolean): void;
+  destroy(): Promise<void>;
+};
+
+type VtoGlobals = typeof globalThis & {
+  THREE: typeof THREE;
+  HandTrackerThreeHelper: VtoHelper;
+  PoseFlipFilter: { instance(spec: Record<string, unknown>): unknown };
+};
+
+const BASE = 'vendor/webar-hand';
+let runtimePromise: Promise<void> | null = null;
+
+const loadScript = (path: string) => new Promise<void>((resolve, reject) => {
+  const script = document.createElement('script');
+  script.src = publicUrl(`${BASE}/${path}`);
+  script.onload = () => resolve();
+  script.onerror = () => reject(new Error(`Could not load ${path}`));
+  document.head.append(script);
+});
+
+const loadRuntime = () => runtimePromise ??= (async () => {
+  (globalThis as VtoGlobals).THREE = THREE;
+  for (const file of ['WebARRocksHand.js', 'OneEuroLMStabilizer.js', 'PoseFlipFilter.js', 'HandTrackerThreeHelper.js']) {
+    await loadScript(file);
+  }
+})();
+
+/** Watch-grade wrist VTO: dedicated wrist detector + PnP pose + soft occlusion. */
 export class Rakhi3DRenderer {
-  private renderer: THREE.WebGLRenderer;
-  private scene = new THREE.Scene();
-  private camera = new THREE.OrthographicCamera(0, 1, 1, 0, .1, 100);
-  private attached: THREE.Group;
-  private attachedPendant: THREE.Object3D;
-  private carried: THREE.Group;
-  private readonly smoothedSurface = new THREE.Vector3(0, 0, 1);
-  private readonly smoothedAxis = new THREE.Vector3(0, -1, 0);
-  private hasSurface = false;
-  private width = 1;
-  private height = 1;
+  private helper: VtoHelper | null = null;
+  private three: VtoThree | null = null;
+  private startPromise: Promise<void> | null = null;
+  private resizeObserver: ResizeObserver | null = null;
+  private trackerCanvas = document.createElement('canvas');
+  private attached: THREE.Group | null = null;
+  private carried: THREE.Group | null = null;
+  private anchor: WristAnchor | null = null;
+  private hands: NormalizedHand[] = [];
+  private state: RakhiTyingState = 'IDLE';
+  private disposed = false;
 
-  constructor(private readonly canvas: HTMLCanvasElement) {
-    this.renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
-    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.04;
-    this.camera.position.z = 10;
+  constructor(private readonly canvas: HTMLCanvasElement) {}
 
-    this.scene.add(new THREE.AmbientLight(0xfff8ef, 2.25));
-    const key = new THREE.DirectionalLight(0xffffff, 2.4);
-    key.position.set(-3, -4, 7);
-    this.scene.add(key);
-    const rim = new THREE.DirectionalLight(0xffc85e, .65);
-    rim.position.set(4, 2, 4);
-    this.scene.add(rim);
-
-    const attached = this.buildAttachedRakhi();
-    this.attached = attached.root;
-    this.attachedPendant = attached.pendant;
-    this.carried = this.buildCarriedRakhi();
-    this.scene.add(this.attached, this.carried);
+  start(video: HTMLVideoElement) {
+    if (this.disposed || video.readyState < 2) return Promise.resolve();
+    return this.startPromise ??= this.initialize(video);
   }
 
-  private materials(overlay = false) {
-    const depth = overlay ? { depthTest: false, depthWrite: false } as const : { depthTest: true, depthWrite: true } as const;
+  private async initialize(video: HTMLVideoElement) {
+    await loadRuntime();
+    if (this.disposed) return;
+    const globals = globalThis as VtoGlobals;
+    this.helper = globals.HandTrackerThreeHelper;
+    this.sizeCanvases(false);
+    this.three = await this.helper.init({
+      handTrackerCanvas: this.trackerCanvas,
+      VTOCanvas: this.canvas,
+      videoSettings: { videoElement: video },
+      NNsPaths: [publicUrl(`${BASE}/NN_WRIST_27.json`)],
+      poseLandmarksLabels: ['wristBack', 'wristLeft', 'wristRight', 'wristPalm', 'wristPalmTop', 'wristBackTop', 'wristRightBottom', 'wristLeftBottom'],
+      objectPointsPositionFactors: [1, 1.3, 1],
+      poseFilter: globals.PoseFlipFilter.instance({ startStabilizeCounter: 8 }),
+      landmarksStabilizerSpec: { minCutOff: .001, beta: 3, freqRange: [2, 144] },
+      stabilizationSettings: { switchNNErrorThreshold: .5 },
+      scanSettings: { threshold: .88, translationScalingFactors: [.3, .3, 1] },
+      threshold: .88,
+      maxHandsDetected: 1,
+      freeZRot: true,
+      enableFlipObject: false,
+      hideTrackerIfDetectionLost: true,
+      debugDisplayLandmarks: false,
+      callbackTrack: (detectState: DetectState) => this.onTrack(detectState),
+    });
+    if (this.disposed) return void this.helper.destroy();
+    this.setupScene();
+    this.resizeObserver = new ResizeObserver(() => this.sizeCanvases(true));
+    this.resizeObserver.observe(this.canvas);
+  }
+
+  private setupScene() {
+    if (!this.three || !this.helper) return;
+    this.three.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.three.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.three.renderer.toneMappingExposure = 1.05;
+    this.three.scene.add(new THREE.HemisphereLight(0xfff8ee, 0x4d2419, 2.2));
+    const key = new THREE.DirectionalLight(0xffffff, 2.4);
+    key.position.set(-4, 7, 12);
+    this.three.scene.add(key);
+
+    this.attached = this.buildAttachedRakhi();
+    this.attached.visible = false;
+    this.helper.add_threeObject(this.attached);
+
+    const radius = 4.55;
+    const occluder = new THREE.Mesh(
+      new THREE.CylinderGeometry(radius, radius, 48, 40, 1, true),
+      new THREE.MeshNormalMaterial(),
+    );
+    occluder.rotation.x = Math.PI / 2;
+    occluder.position.set(0, -.45, .9);
+    this.helper.add_threeSoftOccluder(occluder, radius, .55, false);
+
+    this.carried = this.buildCarriedRakhi();
+    this.carried.visible = false;
+    this.carried.frustumCulled = false;
+    this.three.scene.add(this.carried);
+  }
+
+  private materials() {
     return {
-      red: new THREE.MeshStandardMaterial({ color: 0xa91f2c, roughness: .62, metalness: .03 }),
-      saffron: new THREE.MeshStandardMaterial({ color: 0xe3a625, roughness: .54, metalness: .12 }),
-      petal: new THREE.MeshPhysicalMaterial({ color: 0xa7192f, roughness: .35, metalness: .13, clearcoat: .48, clearcoatRoughness: .28, side: THREE.DoubleSide, ...depth }),
-      gold: new THREE.MeshPhysicalMaterial({ color: 0xe8ad2d, roughness: .28, metalness: .58, clearcoat: .34, side: THREE.DoubleSide, ...depth }),
-      ruby: new THREE.MeshPhysicalMaterial({ color: 0x75152a, roughness: .2, metalness: .2, clearcoat: .72, side: THREE.DoubleSide, ...depth }),
+      red: new THREE.MeshPhysicalMaterial({ color: 0xb22632, roughness: .46, clearcoat: .35 }),
+      saffron: new THREE.MeshPhysicalMaterial({ color: 0xf1b52f, roughness: .34, metalness: .24, clearcoat: .35 }),
+      ruby: new THREE.MeshPhysicalMaterial({ color: 0x741329, roughness: .2, metalness: .16, clearcoat: .72 }),
     };
   }
 
-  /** One unified multicolour flower: one petal body with a nested gold/ruby centre. */
-  private buildFlower(faceCamera = false): THREE.Group {
-    const material = this.materials(faceCamera);
-    const outline = new THREE.Shape();
-    const points = 96;
-    for (let index = 0; index <= points; index += 1) {
-      const angle = index / points * Math.PI * 2;
-      const radius = .3 + Math.cos(angle * 8) * .065;
+  private buildFlower(cameraFacing = false) {
+    const material = this.materials();
+    const shape = new THREE.Shape();
+    for (let index = 0; index <= 96; index += 1) {
+      const angle = index / 96 * Math.PI * 2;
+      const radius = 1.16 + Math.cos(angle * 10) * .28;
       const x = Math.cos(angle) * radius;
       const y = Math.sin(angle) * radius;
-      if (index === 0) outline.moveTo(x, y);
-      else outline.lineTo(x, y);
+      if (index) shape.lineTo(x, y); else shape.moveTo(x, y);
     }
-    const geometry = new THREE.ExtrudeGeometry(outline, {
-      depth: .075, bevelEnabled: true, bevelSegments: 2,
-      bevelSize: .018, bevelThickness: .018, curveSegments: 12,
+    const geometry = new THREE.ExtrudeGeometry(shape, {
+      depth: .28, bevelEnabled: true, bevelSegments: 3,
+      bevelSize: .08, bevelThickness: .08, curveSegments: 14,
     });
     geometry.center();
-    if (!faceCamera) geometry.rotateX(-Math.PI / 2);
-    const petals = new THREE.Mesh(geometry, material.petal);
-    petals.renderOrder = 7;
-
-    const gold = new THREE.Mesh(new THREE.CylinderGeometry(.19, .21, .072, 32), material.gold);
-    const ruby = new THREE.Mesh(new THREE.CylinderGeometry(.09, .1, .082, 24), material.ruby);
-    if (faceCamera) {
+    if (!cameraFacing) geometry.rotateX(-Math.PI / 2);
+    const petals = new THREE.Mesh(geometry, material.red);
+    const gold = new THREE.Mesh(new THREE.CylinderGeometry(.72, .78, .22, 40), material.saffron);
+    const ruby = new THREE.Mesh(new THREE.CylinderGeometry(.34, .4, .27, 32), material.ruby);
+    if (cameraFacing) {
       gold.rotation.x = ruby.rotation.x = Math.PI / 2;
-      gold.position.z = .065;
-      ruby.position.z = .11;
+      gold.position.z = .22;
+      ruby.position.z = .38;
     } else {
-      gold.position.y = .065;
-      ruby.position.y = .11;
+      gold.position.y = .22;
+      ruby.position.y = .38;
     }
-    gold.renderOrder = 8;
-    ruby.renderOrder = 9;
     const flower = new THREE.Group();
     flower.add(petals, gold, ruby);
     return flower;
   }
 
-  private buildAttachedRakhi(): BuiltRakhi {
+  private buildAttachedRakhi() {
     const material = this.materials();
     const root = new THREE.Group();
-    const occluder = new THREE.Mesh(
-      new THREE.CylinderGeometry(.72, .76, 2.2, 32, 1, false),
-      new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: true }),
-    );
-    occluder.rotation.x = Math.PI / 2;
-    occluder.renderOrder = 1;
-
-    const redThread = new THREE.Mesh(new THREE.TorusGeometry(.82, .045, 12, 80), material.red);
-    const goldThread = new THREE.Mesh(new THREE.TorusGeometry(.82, .027, 10, 80), material.saffron);
-    redThread.position.z = -.065;
-    goldThread.position.z = .065;
-    redThread.renderOrder = 2;
-    goldThread.renderOrder = 3;
-
-    const pendant = this.buildFlower();
-    pendant.position.set(0, .84, 0);
-    root.add(occluder, redThread, goldThread, pendant);
-    return { root, pendant };
+    root.position.set(0, -.45, .9);
+    const red = new THREE.Mesh(new THREE.TorusGeometry(4.22, .14, 14, 96), material.red);
+    const gold = new THREE.Mesh(new THREE.TorusGeometry(4.22, .075, 12, 96), material.saffron);
+    red.position.z = -.15;
+    gold.position.z = .15;
+    const flower = this.buildFlower();
+    flower.position.y = 4.23;
+    root.add(red, gold, flower);
+    return root;
   }
 
   private buildCarriedRakhi() {
     const material = this.materials();
     const root = new THREE.Group();
-    const redCord = new THREE.Mesh(new THREE.CylinderGeometry(.028, .028, 2.5, 10), material.red);
-    const goldCord = new THREE.Mesh(new THREE.CylinderGeometry(.018, .018, 2.5, 10), material.saffron);
-    redCord.rotation.z = goldCord.rotation.z = Math.PI / 2;
-    redCord.position.y = -.045;
-    goldCord.position.y = .045;
+    const red = new THREE.Mesh(new THREE.CylinderGeometry(.08, .08, 3.2, 12), material.red);
+    const gold = new THREE.Mesh(new THREE.CylinderGeometry(.045, .045, 3.2, 10), material.saffron);
+    red.rotation.z = gold.rotation.z = Math.PI / 2;
+    red.position.y = -.11;
+    gold.position.y = .11;
     const flower = this.buildFlower(true);
-    flower.scale.setScalar(.92);
-    root.add(redCord, goldCord, flower);
+    flower.scale.setScalar(.62);
+    root.add(red, gold, flower);
     return root;
   }
 
-  draw(anchor: WristAnchor | null, hands: NormalizedHand[], state: RakhiTyingState, mirrored: boolean) {
-    this.resize();
-    const attachedVisible = !!anchor && (state === 'FINISHING_ANIMATION' || state === 'RAKHI_ATTACHED') && anchor.confidence >= .48;
-    this.attached.visible = attachedVisible;
-    if (anchor && attachedVisible) this.placeOnWrist(anchor, mirrored);
-    const carrying = !!anchor && (state === 'APPROACHING_WRIST' || state === 'ALIGNMENT_VALID') && hands.length === 2;
-    this.carried.visible = carrying;
-    if (anchor && carrying) this.placeBetweenPinches(anchor, hands, mirrored);
-    this.renderer.render(this.scene, this.camera);
-  }
-
-  private placeOnWrist(anchor: WristAnchor, mirrored: boolean) {
-    const direction = anchor.forearmDirection;
-    const wristOffset = (anchor.wristWidth ?? anchor.scale * .42) * .16;
-    const anchorX = anchor.x - direction.x * wristOffset;
-    const anchorY = anchor.y - direction.y * wristOffset;
-    const x = (mirrored ? 1 - anchorX : anchorX) * this.width;
-    const y = anchorY * this.height;
-    const widthPx = Math.max(42, (anchor.wristWidth ?? anchor.scale * .42) * this.width);
-    const measuredAxis = anchor.handDirection
-      ? new THREE.Vector3(mirrored ? -anchor.handDirection.x : anchor.handDirection.x, anchor.handDirection.y, -anchor.handDirection.z)
-      : new THREE.Vector3(mirrored ? -direction.x : direction.x, direction.y, 0);
-    if (measuredAxis.lengthSq() < .2) measuredAxis.set(mirrored ? -direction.x : direction.x, direction.y, 0);
-    measuredAxis.normalize();
-    const fallbackAxis = new THREE.Vector3(mirrored ? -direction.x : direction.x, direction.y, 0).normalize();
-    const fallbackFacing = THREE.MathUtils.clamp(anchor.dorsalFacing ?? .7, 0, 1);
-    const fallbackAcross = new THREE.Vector3(-fallbackAxis.y, fallbackAxis.x, 0);
-    const fallbackRoll = (fallbackFacing - .5) * Math.PI;
-    const measuredSurface = anchor.palmNormal
-      ? new THREE.Vector3(mirrored ? -anchor.palmNormal.x : anchor.palmNormal.x, anchor.palmNormal.y, -anchor.palmNormal.z)
-      : fallbackAcross.clone().multiplyScalar(Math.cos(fallbackRoll)).setZ(Math.sin(fallbackRoll));
-
-    // Project the anatomical knuckle-side normal away from the forearm. This
-    // produces a real bracelet basis in face-on, edge-on and palm-side poses.
-    // Mirroring is applied once to X only.
-    measuredSurface.addScaledVector(measuredAxis, -measuredSurface.dot(measuredAxis));
-    if (measuredSurface.lengthSq() < .04) measuredSurface.copy(fallbackAcross).setZ(Math.sin(fallbackRoll));
-    measuredSurface.normalize();
-    if (!this.hasSurface) {
-      this.smoothedSurface.copy(measuredSurface);
-      this.smoothedAxis.copy(measuredAxis);
-      this.hasSurface = true;
-    } else {
-      // A real wrist cannot invert either anatomical axis in one frame.
-      if (this.smoothedSurface.dot(measuredSurface) < -.35) measuredSurface.multiplyScalar(-1);
-      if (this.smoothedAxis.dot(measuredAxis) < -.35) measuredAxis.multiplyScalar(-1);
-      this.smoothedSurface.lerp(measuredSurface, .24).normalize();
-      this.smoothedAxis.lerp(measuredAxis, .3).normalize();
+  private onTrack(detectState: DetectState) {
+    const rightWrist = !!detectState.isDetected && detectState.detected >= .58 && detectState.isRightHand;
+    if (!rightWrist || !this.three || !this.attached) {
+      this.anchor = null;
+      if (this.three?.trackersParent[0]) this.three.trackersParent[0].visible = false;
+      return;
     }
-    const axis = this.smoothedAxis;
-    const surface = this.smoothedSurface.clone().addScaledVector(axis, -this.smoothedSurface.dot(axis)).normalize();
-    // Recompute the radial vector after mirror/depth conversion. This restores
-    // a proper right-handed basis instead of reflecting a quaternion.
-    const crossWrist = surface.clone().cross(axis).normalize();
-    const correctedSurface = axis.clone().cross(crossWrist).normalize();
-    const basis = new THREE.Matrix4().makeBasis(crossWrist, correctedSurface, axis);
-
-    this.attached.position.set(x, y, 0);
-    this.attached.quaternion.setFromRotationMatrix(basis);
-    this.attached.scale.setScalar(THREE.MathUtils.clamp(widthPx * .68, 27, 92));
-    // The flower becomes a true edge profile while turning, then disappears on
-    // the palm side so only the wrapped thread remains.
-    this.attachedPendant.visible = correctedSurface.z > -.12;
+    const parent = this.three.trackersParent[0];
+    parent.visible = true;
+    this.three.scene.updateMatrixWorld(true);
+    const camera = this.three.camera;
+    const project = (point: THREE.Vector3) => this.attached!.localToWorld(point).project(camera);
+    const center = project(new THREE.Vector3());
+    const left = project(new THREE.Vector3(-4.22, 0, 0));
+    const right = project(new THREE.Vector3(4.22, 0, 0));
+    const bottom = project(new THREE.Vector3(0, 0, -2));
+    const top = project(new THREE.Vector3(0, 0, 2));
+    const wristWidth = Math.hypot(right.x - left.x, right.y - left.y) / 2;
+    const axis = { x: top.x - bottom.x, y: bottom.y - top.y };
+    const axisLength = Math.hypot(axis.x, axis.y) || 1;
+    const direction = { x: axis.x / axisLength, y: axis.y / axisLength };
+    this.anchor = {
+      x: (center.x + 1) / 2,
+      y: (1 - center.y) / 2,
+      scale: THREE.MathUtils.clamp(wristWidth * 2.05, .07, .32),
+      wristWidth: THREE.MathUtils.clamp(wristWidth, .03, .16),
+      angle: Math.atan2(direction.y, direction.x) + Math.PI / 2,
+      forearmDirection: direction,
+      confidence: THREE.MathUtils.clamp(detectState.detected, 0, 1),
+    };
+    this.updateVisibility();
+    this.placeCarried();
   }
 
-  private placeBetweenPinches(anchor: WristAnchor, hands: NormalizedHand[], mirrored: boolean) {
-    const targetScale = Math.max(.045, anchor.scale * .42);
-    const points = hands.map((hand) => retargetHand(hand, {
-      x: anchor.x, y: anchor.y, palmScale: targetScale,
-      angle: anchor.angle - Math.PI / 2, motionGain: .92,
-    }));
-    const pinch = (landmarks: Vec3[]) => ({
-      x: ((landmarks[4]?.x ?? landmarks[0].x) + (landmarks[8]?.x ?? landmarks[0].x)) / 2,
-      y: ((landmarks[4]?.y ?? landmarks[0].y) + (landmarks[8]?.y ?? landmarks[0].y)) / 2,
-    });
-    const map = (point: { x: number; y: number }) => ({ x: (mirrored ? 1 - point.x : point.x) * this.width, y: point.y * this.height });
-    const first = map(pinch(points[0]));
-    const second = map(pinch(points[1]));
-    const span = Math.hypot(second.x - first.x, second.y - first.y);
-    this.carried.position.set((first.x + second.x) / 2, (first.y + second.y) / 2, .5);
-    this.carried.rotation.set(0, 0, Math.atan2(second.y - first.y, second.x - first.x));
-    this.carried.scale.setScalar(THREE.MathUtils.clamp(span * .45, 42, 118));
+  draw(hands: NormalizedHand[], state: RakhiTyingState, mirrored: boolean) {
+    this.hands = hands;
+    this.state = state;
+    this.canvas.classList.toggle('mirrored-rakhi', mirrored);
+    this.updateVisibility();
+    this.placeCarried();
   }
 
-  private resize() {
-    const width = Math.max(1, this.canvas.clientWidth);
-    const height = Math.max(1, this.canvas.clientHeight);
-    if (width === this.width && height === this.height) return;
-    this.width = width;
-    this.height = height;
-    this.renderer.setSize(width, height, false);
-    this.camera.left = 0;
-    this.camera.right = width;
-    this.camera.top = 0;
-    this.camera.bottom = height;
-    this.camera.updateProjectionMatrix();
+  getAnchor() {
+    return this.anchor;
+  }
+
+  private updateVisibility() {
+    if (!this.attached || !this.carried) return;
+    this.attached.visible = !!this.anchor && (this.state === 'FINISHING_ANIMATION' || this.state === 'RAKHI_ATTACHED');
+    this.carried.visible = !!this.anchor && ['POSITIONING', 'APPROACHING_WRIST', 'ALIGNMENT_VALID'].includes(this.state) && this.hands.length === 2;
+  }
+
+  private placeCarried() {
+    if (!this.carried?.visible || !this.anchor || !this.three) return;
+    const placement = rakhiPlacement(this.hands, this.anchor);
+    if (!placement) return;
+    const camera = this.three.camera;
+    const screenToWorld = (x: number, y: number) => {
+      const point = new THREE.Vector3(x * 2 - 1, 1 - y * 2, .5).unproject(camera);
+      return camera.position.clone().add(point.sub(camera.position).normalize().multiplyScalar(12));
+    };
+    const center = screenToWorld(placement.center.x, placement.center.y);
+    const edge = screenToWorld(placement.center.x + placement.span / 2, placement.center.y);
+    this.carried.position.copy(center);
+    this.carried.quaternion.copy(camera.quaternion);
+    this.carried.rotateZ(-placement.angle);
+    this.carried.scale.setScalar(THREE.MathUtils.clamp(center.distanceTo(edge) / 1.6, .28, 1.45));
+  }
+
+  private sizeCanvases(notify: boolean) {
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    const width = Math.max(2, Math.round(this.canvas.clientWidth * dpr));
+    const height = Math.max(2, Math.round(this.canvas.clientHeight * dpr));
+    if (this.canvas.width === width && this.canvas.height === height) return;
+    this.canvas.width = this.trackerCanvas.width = width;
+    this.canvas.height = this.trackerCanvas.height = height;
+    if (notify) this.helper?.resize(width, height);
   }
 
   dispose() {
-    this.scene.traverse((object) => {
-      if (!(object instanceof THREE.Mesh)) return;
-      object.geometry.dispose();
-      (Array.isArray(object.material) ? object.material : [object.material]).forEach((material) => material.dispose());
-    });
-    this.renderer.dispose();
+    this.disposed = true;
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
+    this.anchor = null;
+    if (this.helper && this.startPromise) void this.helper.destroy();
   }
 }

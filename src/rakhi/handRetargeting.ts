@@ -1,4 +1,4 @@
-import type { NormalizedHand, TrackedHand, Vec2, Vec3 } from '../types/vision';
+import type { NormalizedHand, TrackedHand, Vec2, Vec3, WristAnchor } from '../types/vision';
 import { distance, normalize } from '../vision/math';
 
 const MIDDLE_MCP = 9;
@@ -82,4 +82,31 @@ export const pairGuideDistance = (hands: NormalizedHand[], guide: Vec2 = DEFAULT
   if (!hands.length) return Number.POSITIVE_INFINITY;
   const center = hands[0].pairCenter;
   return Math.hypot(center.x - guide.x, center.y - guide.y);
+};
+
+export const retargetHandsToWrist = (hands: NormalizedHand[], wrist: WristAnchor) => {
+  const palmScale = Math.max(.045, wrist.scale * .42);
+  return hands.map((hand) => retargetHand(hand, {
+    x: wrist.x,
+    y: wrist.y,
+    palmScale,
+    angle: wrist.angle - Math.PI / 2,
+    motionGain: .92,
+  }));
+};
+
+/** The on-screen Rakhi position shared by rendering and attachment logic. */
+export const rakhiPlacement = (hands: NormalizedHand[], wrist: WristAnchor) => {
+  if (hands.length !== 2) return null;
+  const pinches = retargetHandsToWrist(hands, wrist).map((points) => ({
+    x: ((points[4]?.x ?? points[0].x) + (points[8]?.x ?? points[0].x)) / 2,
+    y: ((points[4]?.y ?? points[0].y) + (points[8]?.y ?? points[0].y)) / 2,
+  }));
+  const center = { x: (pinches[0].x + pinches[1].x) / 2, y: (pinches[0].y + pinches[1].y) / 2 };
+  return {
+    center,
+    span: Math.hypot(pinches[1].x - pinches[0].x, pinches[1].y - pinches[0].y),
+    angle: Math.atan2(pinches[1].y - pinches[0].y, pinches[1].x - pinches[0].x),
+    wristDistance: Math.hypot(center.x - wrist.x, center.y - wrist.y),
+  };
 };

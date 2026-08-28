@@ -6,7 +6,6 @@ export type ActiveRitual = 'AARTI' | 'TILAK' | 'RAKHI' | null;
 
 export interface CeremonyVisionState {
   faceActivated: boolean;
-  wristActivated: boolean;
   giverHandsActive: boolean;
   rakhiState: RakhiTyingState;
 }
@@ -16,7 +15,8 @@ export const deriveNetworkVisionFeatures = (
   state: CeremonyVisionState,
 ): VisionFeatures => ({
   face: role === 'RECEIVER' && state.faceActivated,
-  wrist: role === 'RECEIVER' && state.wristActivated,
+  // Phase 3 uses the wrist-specific VTO tracker on the displayed receiver feed.
+  wrist: false,
   hands: role === 'GIVER' && state.giverHandsActive,
 });
 
