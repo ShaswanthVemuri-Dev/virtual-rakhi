@@ -1,42 +1,76 @@
 import type { FaceAnchor } from '../types/vision';
+import { publicUrl } from '../app/baseUrl';
 
-const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
+const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+const smoothstep = (value: number) => {
+  const t = clamp01(value);
+  return t * t * (3 - 2 * t);
+};
 
-/** Illustrated kumkum application with no photographic hand or finger convention. */
+/** Dorsal-hand illustration whose hidden ring-finger pad follows the Tilaka stroke. */
 export class TilakHandRenderer {
+  private image = new Image();
+  private ready = false;
+
+  constructor() {
+    this.image.onload = () => (this.ready = true);
+    this.image.src = publicUrl('assets/tilak_applying_hand.webp');
+  }
+
   draw(ctx: CanvasRenderingContext2D, anchor: FaceAnchor, progress: number, mirrored = true) {
-    const p = Math.max(0, Math.min(1, progress));
-    const targetX = (mirrored ? 1 - anchor.x : anchor.x) * ctx.canvas.width;
-    const targetY = anchor.y * ctx.canvas.height;
-    const travel = easeOutCubic(Math.min(1, p / .6));
-    const startY = targetY + Math.min(ctx.canvas.height * .22, 180);
-    const y = startY + (targetY - startY) * travel;
-    const size = Math.max(11, anchor.scale * ctx.canvas.width * .42);
-    const alpha = p < .08 ? p / .08 : p > .68 ? Math.max(0, (1 - p) / .32) : 1;
+    if (!this.ready) return;
+    const p = clamp01(progress);
+    const width = ctx.canvas.width;
+    const height = ctx.canvas.height;
+    const targetX = (mirrored ? 1 - anchor.x : anchor.x) * width;
+    const targetY = anchor.y * height;
+    const markHeight = Math.max(30, anchor.scale * width * 1.65);
+    const assetSize = Math.min(
+      height * .58,
+      Math.max(height * .38, anchor.scale * width * 4.6),
+    );
 
+    let tipX = targetX;
+    let tipY = targetY + markHeight * .3;
+    let depthScale = 1;
+    let alpha = 1;
+
+    if (p < .42) {
+      const t = smoothstep(p / .42);
+      tipX = targetX + width * .035 * (1 - t);
+      tipY = height + assetSize * .05 + (targetY + markHeight * .3 - height - assetSize * .05) * t;
+      depthScale = .68 + .32 * t;
+    } else if (p < .66) {
+      const t = smoothstep((p - .42) / .24);
+      tipY = targetY + markHeight * (.3 - .6 * t);
+      depthScale = 1 + .035 * t;
+    } else if (p > .74) {
+      const t = smoothstep((p - .74) / .26);
+      tipY = targetY - markHeight * .3 + height * .07 * t;
+      depthScale = 1.035 - .275 * t;
+      alpha = 1 - t;
+    } else {
+      tipY = targetY - markHeight * .3;
+      depthScale = 1.035;
+    }
+
+    // Normalized location of the extended ring-finger pad in the asset.
+    const fingerX = .394;
+    const fingerY = .016;
     ctx.save();
-    ctx.globalAlpha = Math.max(0, alpha);
-    const trail = ctx.createLinearGradient(targetX, y, targetX, startY);
-    trail.addColorStop(0, 'rgba(170, 33, 35, .9)');
-    trail.addColorStop(1, 'rgba(170, 33, 35, 0)');
-    ctx.strokeStyle = trail;
-    ctx.lineCap = 'round';
-    ctx.lineWidth = Math.max(2, size * .15);
-    ctx.beginPath();
-    ctx.moveTo(targetX, y + size * 1.4);
-    ctx.lineTo(targetX, y);
-    ctx.stroke();
-
-    const pigment = ctx.createRadialGradient(targetX - size * .18, y - size * .22, 1, targetX, y, size);
-    pigment.addColorStop(0, '#ef6c55');
-    pigment.addColorStop(.38, '#b52225');
-    pigment.addColorStop(1, '#741417');
-    ctx.fillStyle = pigment;
-    ctx.shadowBlur = size * .8;
-    ctx.shadowColor = 'rgba(211, 57, 39, .45)';
-    ctx.beginPath();
-    ctx.arc(targetX, y, size * .48, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.globalAlpha = alpha;
+    ctx.translate(tipX, tipY);
+    ctx.rotate((mirrored ? -anchor.rotation : anchor.rotation) * .2);
+    ctx.scale(depthScale, depthScale);
+    ctx.shadowBlur = assetSize * .025;
+    ctx.shadowColor = 'rgba(64, 31, 20, .18)';
+    ctx.drawImage(
+      this.image,
+      -fingerX * assetSize,
+      -fingerY * assetSize,
+      assetSize,
+      assetSize,
+    );
     ctx.restore();
   }
 }

@@ -84,10 +84,12 @@ export class Rakhi3DRenderer {
       NNsPaths: [publicUrl(`${BASE}/NN_WRIST_27.json`)],
       poseLandmarksLabels: ['wristBack', 'wristLeft', 'wristRight', 'wristPalm', 'wristPalmTop', 'wristBackTop', 'wristRightBottom', 'wristLeftBottom'],
       objectPointsPositionFactors: [1, 1.3, 1],
-      poseFilter: globals.PoseFlipFilter.instance({ startStabilizeCounter: 4 }),
-      landmarksStabilizerSpec: { minCutOff: .001, beta: 3, freqRange: [2, 144] },
+      // Preserve the proven pose solve while letting translation respond to
+      // real landmark motion instead of visibly trailing it.
+      poseFilter: globals.PoseFlipFilter.instance({ startStabilizeCounter: 2, dPixTransTol: 32 }),
+      landmarksStabilizerSpec: { minCutOff: .001, beta: 5, freqRange: [2, 144] },
       stabilizationSettings: { switchNNErrorThreshold: .5 },
-      scanSettings: { threshold: .72, translationScalingFactors: [.3, .3, 1] },
+      scanSettings: { threshold: .72, translationScalingFactors: [.52, .52, 1] },
       threshold: .72,
       maxHandsDetected: 1,
       freeZRot: true,
@@ -272,9 +274,13 @@ export class Rakhi3DRenderer {
   }
 
   private sizeCanvases(notify: boolean) {
-    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
-    const width = Math.max(2, Math.round(this.canvas.clientWidth * dpr));
-    const height = Math.max(2, Math.round(this.canvas.clientHeight * dpr));
+    const clientWidth = Math.max(2, this.canvas.clientWidth);
+    const clientHeight = Math.max(2, this.canvas.clientHeight);
+    // The call camera is requested at 1280x720. Rendering a larger tracking
+    // surface adds GPU work but no wrist detail, especially on high-DPI iPads.
+    const scale = Math.min(window.devicePixelRatio || 1, 1.5, 1280 / clientWidth, 720 / clientHeight);
+    const width = Math.max(2, Math.round(clientWidth * scale));
+    const height = Math.max(2, Math.round(clientHeight * scale));
     if (this.canvas.width === width && this.canvas.height === height) return;
     this.canvas.width = this.trackerCanvas.width = width;
     this.canvas.height = this.trackerCanvas.height = height;

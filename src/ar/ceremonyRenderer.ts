@@ -45,11 +45,9 @@ export class CeremonyRenderer {
     if (options.aartiProgress !== null) this.aarti.draw(ctx, options.aartiProgress);
 
     if (options.tilakProgress !== null && face.value) {
+      const reveal = Math.max(0, Math.min(1, (options.tilakProgress - .42) / .24));
+      if (reveal > 0) this.tilak.draw(ctx, face.value, 1, mirrored, reveal * reveal * (3 - 2 * reveal));
       this.tilakHand.draw(ctx, face.value, options.tilakProgress, mirrored);
-      if (options.tilakProgress >= 0.56) {
-        const alpha = Math.min(1, (options.tilakProgress - 0.56) / 0.16);
-        this.tilak.draw(ctx, face.value, alpha, mirrored);
-      }
     } else if (options.tilakApplied && face.value) {
       this.tilak.draw(ctx, face.value, face.alpha, mirrored);
     }

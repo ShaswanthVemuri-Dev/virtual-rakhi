@@ -43,6 +43,7 @@ type TilakFlow = 'IDLE' | 'WAIT_FACE' | 'ANIMATING' | 'DONE';
 
 const oppositeRole = (role: CeremonyRole): CeremonyRole => role === 'GIVER' ? 'RECEIVER' : 'GIVER';
 const AARTI_DURATION_MS = 13_500;
+const TILAK_DURATION_MS = 3_200;
 
 export default function NetworkCeremonyApp() {
   const mainVideoRef = useRef<HTMLVideoElement>(null);
@@ -72,6 +73,7 @@ export default function NetworkCeremonyApp() {
   const rakhiAttachedRef = useRef(false);
   const rakhiStateRef = useRef<RakhiTyingState>('IDLE');
   const remoteFaceRef = useRef<FaceAnchor | null>(null);
+  const retainedTilakFaceRef = useRef<FaceAnchor | null>(null);
   const remoteWristRef = useRef<WristAnchor | null>(null);
   const remoteHandsRef = useRef<NormalizedHand[]>([]);
   const aartiStartRef = useRef<number | null>(null);
@@ -202,6 +204,7 @@ export default function NetworkCeremonyApp() {
     setFaceActivated(false);
     setGiverHandsActive(false);
     remoteFaceRef.current = null;
+    retainedTilakFaceRef.current = null;
     remoteWristRef.current = null;
     remoteHandsRef.current = [];
     vtoStartRef.current = false;
@@ -313,6 +316,9 @@ export default function NetworkCeremonyApp() {
   };
 
   const beginRemoteRakhi = () => {
+    // Face tracking has no part in Rakhi placement. Releasing its GPU delegate
+    // leaves the wrist-specific tracker with the full frame budget.
+    setFaceActivated(false);
     setGiverHandsActive(false);
     setActiveRitual('RAKHI');
     if (roleRef.current === 'GIVER') {
@@ -415,6 +421,7 @@ export default function NetworkCeremonyApp() {
       fitCanvasToVideo(canvas, mainVideo);
       const now = performance.now();
       const local = await managerRef.current.process(trackingVideo, now);
+      if (roleRef.current === 'RECEIVER' && local.faceAnchor) retainedTilakFaceRef.current = local.faceAnchor;
 
       const vto = rakhi3dRef.current;
       if (vto && !vtoStartRef.current && wristTrackingVideo.readyState >= 2) {
@@ -469,8 +476,9 @@ export default function NetworkCeremonyApp() {
         if (roleRef.current === 'GIVER') send({ type: 'AARTI_COMPLETE', timestamp: Date.now() });
       }
 
-      if (activeRitualRef.current === 'TILAK' && tilakFlowRef.current === 'ANIMATING' && tilakStartRef.current !== null && now - tilakStartRef.current >= 2000) {
+      if (activeRitualRef.current === 'TILAK' && tilakFlowRef.current === 'ANIMATING' && tilakStartRef.current !== null && now - tilakStartRef.current >= TILAK_DURATION_MS) {
         if (roleRef.current === 'RECEIVER') send({ type: 'TILAK_APPLIED', timestamp: Date.now() });
+        setFaceActivated(false);
         setTilakApplied(true);
         setTilakFlow('DONE');
         setActiveRitual(null);
@@ -498,13 +506,19 @@ export default function NetworkCeremonyApp() {
 
       const composed: Phase1Frame = roleRef.current === 'GIVER'
         ? { ...local, faceAnchor: remoteFaceRef.current, wristAnchor: trackedWrist, faceLandmarks: [], poseLandmarks: [] }
-        : { ...local, wristAnchor: trackedWrist, normalizedHands: remoteHandsRef.current, hands: [] };
+        : {
+          ...local,
+          faceAnchor: local.faceAnchor ?? (tilakAppliedRef.current ? retainedTilakFaceRef.current : null),
+          wristAnchor: trackedWrist,
+          normalizedHands: remoteHandsRef.current,
+          hands: [],
+        };
       const faceHeld = faceRetentionRef.current.update(composed.faceAnchor, now);
       rendererRef.current.draw(canvas, composed, faceHeld, wristHeld, {
         tilakApplied: tilakAppliedRef.current,
         rakhiAttached: rakhiAttachedRef.current,
         aartiProgress: activeRitualRef.current === 'AARTI' && aartiStartRef.current !== null ? Math.min(1, (now - aartiStartRef.current) / AARTI_DURATION_MS) : null,
-        tilakProgress: activeRitualRef.current === 'TILAK' && tilakStartRef.current !== null ? Math.min(1, (now - tilakStartRef.current) / 2000) : null,
+        tilakProgress: activeRitualRef.current === 'TILAK' && tilakStartRef.current !== null ? Math.min(1, (now - tilakStartRef.current) / TILAK_DURATION_MS) : null,
         frozenWrist: null,
         rakhiState: rakhiStateRef.current,
         mirrored: roleRef.current === 'RECEIVER',
