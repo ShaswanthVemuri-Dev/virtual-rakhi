@@ -13,6 +13,8 @@ export class Rakhi3DRenderer {
   private attached: THREE.Group;
   private attachedPendant: THREE.Object3D;
   private carried: THREE.Group;
+  private readonly smoothedSurface = new THREE.Vector3(0, 0, 1);
+  private hasSurface = false;
   private width = 1;
   private height = 1;
 
@@ -40,15 +42,18 @@ export class Rakhi3DRenderer {
   }
 
   private materials() {
+    const overlay = { depthTest: false, depthWrite: false } as const;
     return {
       red: new THREE.MeshStandardMaterial({ color: 0xa91f2c, roughness: .62, metalness: .03 }),
       saffron: new THREE.MeshStandardMaterial({ color: 0xe3a625, roughness: .54, metalness: .12 }),
-      flower: new THREE.MeshPhysicalMaterial({ color: 0xb62532, roughness: .36, metalness: .18, clearcoat: .42, clearcoatRoughness: .3, side: THREE.DoubleSide }),
+      petal: new THREE.MeshPhysicalMaterial({ color: 0xa7192f, roughness: .35, metalness: .13, clearcoat: .48, clearcoatRoughness: .28, side: THREE.DoubleSide, ...overlay }),
+      gold: new THREE.MeshPhysicalMaterial({ color: 0xe8ad2d, roughness: .28, metalness: .58, clearcoat: .34, side: THREE.DoubleSide, ...overlay }),
+      ruby: new THREE.MeshPhysicalMaterial({ color: 0x75152a, roughness: .2, metalness: .2, clearcoat: .72, side: THREE.DoubleSide, ...overlay }),
     };
   }
 
-  /** One continuous, lightly extruded flower mesh—never separate petal pieces. */
-  private buildFlower(faceCamera = false) {
+  /** One unified multicolour flower: one petal body with a nested gold/ruby centre. */
+  private buildFlower(faceCamera = false): THREE.Group {
     const material = this.materials();
     const outline = new THREE.Shape();
     const points = 96;
@@ -66,8 +71,23 @@ export class Rakhi3DRenderer {
     });
     geometry.center();
     if (!faceCamera) geometry.rotateX(-Math.PI / 2);
-    const flower = new THREE.Mesh(geometry, material.flower);
-    flower.renderOrder = 6;
+    const petals = new THREE.Mesh(geometry, material.petal);
+    petals.renderOrder = 7;
+
+    const gold = new THREE.Mesh(new THREE.CylinderGeometry(.19, .21, .072, 32), material.gold);
+    const ruby = new THREE.Mesh(new THREE.CylinderGeometry(.09, .1, .082, 24), material.ruby);
+    if (faceCamera) {
+      gold.rotation.x = ruby.rotation.x = Math.PI / 2;
+      gold.position.z = .065;
+      ruby.position.z = .11;
+    } else {
+      gold.position.y = .065;
+      ruby.position.y = .11;
+    }
+    gold.renderOrder = 8;
+    ruby.renderOrder = 9;
+    const flower = new THREE.Group();
+    flower.add(petals, gold, ruby);
     return flower;
   }
 
@@ -127,17 +147,29 @@ export class Rakhi3DRenderer {
     const x = (mirrored ? 1 - anchorX : anchorX) * this.width;
     const y = anchorY * this.height;
     const widthPx = Math.max(42, (anchor.wristWidth ?? anchor.scale * .42) * this.width);
-    const facing = THREE.MathUtils.clamp(anchor.dorsalFacing ?? .7, 0, 1);
-
     const axis = new THREE.Vector3(mirrored ? -direction.x : direction.x, direction.y, 0).normalize();
-    const screenAcross = new THREE.Vector3(-axis.y, axis.x, 0);
-    // A constrained wrist roll is substantially more stable than applying the
-    // noisy raw world-normal X/Y values directly. Dorsal=face-on, side=edge-on,
-    // palm=away from camera.
-    const roll = (facing - .5) * Math.PI;
-    const surface = screenAcross.multiplyScalar(Math.cos(roll));
-    surface.z = Math.sin(roll);
-    surface.normalize();
+    const fallbackFacing = THREE.MathUtils.clamp(anchor.dorsalFacing ?? .7, 0, 1);
+    const fallbackAcross = new THREE.Vector3(-axis.y, axis.x, 0);
+    const fallbackRoll = (fallbackFacing - .5) * Math.PI;
+    const measuredSurface = anchor.palmNormal
+      ? new THREE.Vector3(mirrored ? -anchor.palmNormal.x : anchor.palmNormal.x, anchor.palmNormal.y, -anchor.palmNormal.z)
+      : fallbackAcross.clone().multiplyScalar(Math.cos(fallbackRoll)).setZ(Math.sin(fallbackRoll));
+
+    // Project the anatomical knuckle-side normal away from the forearm. This
+    // produces a real bracelet basis in face-on, edge-on and palm-side poses.
+    // Mirroring is applied once to X only.
+    measuredSurface.addScaledVector(axis, -measuredSurface.dot(axis));
+    if (measuredSurface.lengthSq() < .04) measuredSurface.copy(fallbackAcross).setZ(Math.sin(fallbackRoll));
+    measuredSurface.normalize();
+    if (!this.hasSurface) {
+      this.smoothedSurface.copy(measuredSurface);
+      this.hasSurface = true;
+    } else {
+      // Reject a one-frame 180° normal flip near an edge-on wrist.
+      if (this.smoothedSurface.dot(measuredSurface) < -.35) measuredSurface.multiplyScalar(-1);
+      this.smoothedSurface.lerp(measuredSurface, .24).normalize();
+    }
+    const surface = this.smoothedSurface;
     const crossWrist = surface.clone().cross(axis).normalize();
     const correctedSurface = axis.clone().cross(crossWrist).normalize();
     const basis = new THREE.Matrix4().makeBasis(crossWrist, correctedSurface, axis);
@@ -145,7 +177,9 @@ export class Rakhi3DRenderer {
     this.attached.position.set(x, y, 0);
     this.attached.quaternion.setFromRotationMatrix(basis);
     this.attached.scale.setScalar(THREE.MathUtils.clamp(widthPx * .68, 27, 92));
-    this.attachedPendant.visible = facing > .38;
+    // The flower becomes a true edge profile while turning, then disappears on
+    // the palm side so only the wrapped thread remains.
+    this.attachedPendant.visible = correctedSurface.z > -.12;
   }
 
   private placeBetweenPinches(anchor: WristAnchor, hands: NormalizedHand[], mirrored: boolean) {

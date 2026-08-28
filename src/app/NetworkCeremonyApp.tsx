@@ -41,6 +41,7 @@ type SessionState = 'LOBBY' | 'PREPARING' | 'WAITING' | 'ACTIVE' | 'ENDED';
 type TilakFlow = 'IDLE' | 'WAIT_FACE' | 'ANIMATING' | 'DONE';
 
 const oppositeRole = (role: CeremonyRole): CeremonyRole => role === 'GIVER' ? 'RECEIVER' : 'GIVER';
+const AARTI_DURATION_MS = 13_500;
 
 export default function NetworkCeremonyApp() {
   const mainVideoRef = useRef<HTMLVideoElement>(null);
@@ -426,7 +427,7 @@ export default function NetworkCeremonyApp() {
         } else faceStableSinceRef.current = null;
       }
 
-      if (activeRitualRef.current === 'AARTI' && aartiStartRef.current !== null && now - aartiStartRef.current >= 4800) {
+      if (activeRitualRef.current === 'AARTI' && aartiStartRef.current !== null && now - aartiStartRef.current >= AARTI_DURATION_MS) {
         aartiStartRef.current = null;
         setAartiComplete(true);
         setActiveRitual(null);
@@ -469,7 +470,7 @@ export default function NetworkCeremonyApp() {
       rendererRef.current.draw(canvas, composed, faceHeld, wristHeld, {
         tilakApplied: tilakAppliedRef.current,
         rakhiAttached: rakhiAttachedRef.current,
-        aartiProgress: activeRitualRef.current === 'AARTI' && aartiStartRef.current !== null ? Math.min(1, (now - aartiStartRef.current) / 4800) : null,
+        aartiProgress: activeRitualRef.current === 'AARTI' && aartiStartRef.current !== null ? Math.min(1, (now - aartiStartRef.current) / AARTI_DURATION_MS) : null,
         tilakProgress: activeRitualRef.current === 'TILAK' && tilakStartRef.current !== null ? Math.min(1, (now - tilakStartRef.current) / 2000) : null,
         frozenWrist: null,
         rakhiState: rakhiStateRef.current,

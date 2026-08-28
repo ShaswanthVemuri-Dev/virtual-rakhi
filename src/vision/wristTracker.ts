@@ -61,7 +61,6 @@ export class WristTracker {
     const forearmLength = distance(wrist, elbow);
     if (handIndex < 0 || closestDistance > Math.max(.13, forearmLength * .9)) return { anchor: null, landmarks };
     const imageHand = handResult.landmarks?.[handIndex];
-    const worldHand = handResult.worldLandmarks?.[handIndex];
     const handScore = handResult.handednesses?.[handIndex]?.[0]?.score ?? 0;
     const direction = normalize({ x: wrist.x - elbow.x, y: wrist.y - elbow.y });
     const angle = Math.atan2(direction.y, direction.x) + Math.PI / 2;
@@ -77,9 +76,11 @@ export class WristTracker {
       // when a side-facing fist foreshortens the index-to-pinky distance.
       wristWidth = clamp(Math.max(acrossPalm, palmLength, forearmLength * .31), .03, .14);
     }
-    if (worldHand?.[0] && worldHand?.[INDEX_MCP] && worldHand?.[PINKY_MCP] && worldHand?.[MIDDLE_MCP]) {
-      const side = sub(worldHand[PINKY_MCP], worldHand[INDEX_MCP]);
-      const forward = sub(worldHand[MIDDLE_MCP], worldHand[0]);
+    if (imageHand?.[0] && imageHand?.[INDEX_MCP] && imageHand?.[PINKY_MCP] && imageHand?.[MIDDLE_MCP]) {
+      // Image-space 3D landmarks keep X/Y in the exact coordinate system sent
+      // over WebRTC. This avoids mixing the world-landmark Y axis with video X/Y.
+      const side = sub(imageHand[PINKY_MCP], imageHand[INDEX_MCP]);
+      const forward = sub(imageHand[MIDDLE_MCP], imageHand[0]);
       palmNormal = unit3(cross(side, forward));
       handDirection = unit3(forward);
       // MediaPipe z becomes smaller toward the camera. For a physical right hand,
