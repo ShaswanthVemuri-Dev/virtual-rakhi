@@ -49,19 +49,50 @@ const loadRuntime = () => runtimePromise ??= (async () => {
   }
 })();
 
-export const wristScaleSample = (vtoDiameter: number, targetWidth: number, dorsalFacing = 1) => {
-  if (![vtoDiameter, targetWidth, dorsalFacing].every(Number.isFinite)
-    || vtoDiameter < .03 || targetWidth <= 0 || dorsalFacing < .65) return null;
-  const ratio = targetWidth / vtoDiameter;
-  // Reject foreshortened projections. WebAR remains the scale authority unless
-  // both trackers already agree within a normal wrist-size adjustment.
-  return ratio >= .72 && ratio <= 1.28 ? ratio : null;
+export const projectRingDiameter = (
+  object: THREE.Object3D,
+  camera: THREE.Camera,
+  radius = 4.22,
+) => {
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  for (let index = 0; index < 16; index += 1) {
+    const angle = index / 16 * Math.PI * 2;
+    const projected = object.localToWorld(new THREE.Vector3(
+      Math.cos(angle) * radius,
+      Math.sin(angle) * radius,
+      0,
+    )).project(camera);
+    if (![projected.x, projected.y, projected.z].every(Number.isFinite)) return null;
+    // MediaPipe and ceremony messages use 0..1 image coordinates. Converting
+    // here avoids comparing them with Three's -1..1 NDC space.
+    const x = (projected.x + 1) / 2;
+    const y = (1 - projected.y) / 2;
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+    minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+  }
+  const diameter = Math.max(maxX - minX, maxY - minY);
+  return Number.isFinite(diameter) && diameter > .002 ? diameter : null;
 };
 
-export const medianWristScale = (samples: number[]) => {
-  if (samples.length < 5) return null;
-  const sorted = [...samples].sort((a, b) => a - b);
-  return THREE.MathUtils.clamp(sorted[Math.floor(sorted.length / 2)], .8, 1.2);
+export const fitHybridWristScale = (
+  projectedDiameter: number,
+  targetWidth: number,
+  previous: number,
+  ready: boolean,
+) => {
+  if (![projectedDiameter, targetWidth, previous].every(Number.isFinite)
+    || projectedDiameter <= .002 || targetWidth <= 0) return previous;
+  const measured = THREE.MathUtils.clamp(targetWidth / projectedDiameter, .08, 3);
+  if (!ready) return measured;
+  const change = measured / Math.max(previous, .001);
+  // A reacquired VTO pose can jump in depth. Correct that immediately; smooth
+  // only ordinary frame-to-frame wrist-size noise.
+  return change < .55 || change > 1.8
+    ? measured
+    : THREE.MathUtils.lerp(previous, measured, .32);
 };
 
 export const canRetainRightPose = (hasPose: boolean, positionConfidence: number, missingForMs: number) =>
@@ -87,8 +118,7 @@ export class Rakhi3DRenderer {
   private positionAnchor: WristAnchor | null = null;
   private lastRightPose: THREE.Matrix4 | null = null;
   private fittedScale = 1;
-  private scaleSamples: number[] = [];
-  private scaleLocked = false;
+  private scaleReady = false;
   private trackerDepth = .92;
   private lastTrackedAt = -Infinity;
   private hands: NormalizedHand[] = [];
@@ -274,14 +304,15 @@ export class Rakhi3DRenderer {
     const right = project(new THREE.Vector3(4.22, 0, 0));
     const bottom = project(new THREE.Vector3(0, 0, -2));
     const top = project(new THREE.Vector3(0, 0, 2));
-    const wristWidth = Math.hypot(right.x - left.x, right.y - left.y);
+    // Three projects to -1..1 while the rest of the app uses 0..1.
+    const wristWidth = Math.hypot(right.x - left.x, right.y - left.y) / 2;
     const axis = { x: top.x - bottom.x, y: bottom.y - top.y };
     const axisLength = Math.hypot(axis.x, axis.y) || 1;
     const direction = { x: axis.x / axisLength, y: axis.y / axisLength };
     this.anchor = {
       x: (center.x + 1) / 2,
       y: (1 - center.y) / 2,
-      scale: THREE.MathUtils.clamp(wristWidth * 1.025, .07, .32),
+      scale: THREE.MathUtils.clamp(wristWidth * 2.05, .07, .32),
       wristWidth: THREE.MathUtils.clamp(wristWidth, .03, .16),
       angle: Math.atan2(direction.y, direction.x) + Math.PI / 2,
       forearmDirection: direction,
@@ -292,7 +323,6 @@ export class Rakhi3DRenderer {
   draw(hands: NormalizedHand[], state: RakhiTyingState, mirrored: boolean) {
     this.hands = hands;
     this.state = state;
-    if (state === 'FINISHING_ANIMATION' || state === 'RAKHI_ATTACHED') this.scaleLocked = true;
     this.canvas.classList.toggle('mirrored-rakhi', mirrored);
     this.updateVisibility();
     this.placeCarried();
@@ -316,21 +346,19 @@ export class Rakhi3DRenderer {
       .035,
       .14,
     );
-    if (!this.scaleLocked && targetWidth > .005) {
+    if (targetWidth > .005) {
       this.attached.scale.setScalar(1);
       this.occluder?.scale.setScalar(1);
       this.three.scene.updateMatrixWorld(true);
-      const left = this.attached.localToWorld(new THREE.Vector3(-4.22, 0, 0)).project(camera);
-      const right = this.attached.localToWorld(new THREE.Vector3(4.22, 0, 0)).project(camera);
-      const sample = wristScaleSample(
-        Math.hypot(right.x - left.x, right.y - left.y),
-        targetWidth,
-        this.positionAnchor.dorsalFacing,
-      );
-      if (sample !== null) {
-        this.scaleSamples.push(sample);
-        if (this.scaleSamples.length > 9) this.scaleSamples.shift();
-        this.fittedScale = medianWristScale(this.scaleSamples) ?? 1;
+      const projectedDiameter = projectRingDiameter(this.attached, camera);
+      if (projectedDiameter !== null) {
+        this.fittedScale = fitHybridWristScale(
+          projectedDiameter,
+          targetWidth,
+          this.fittedScale,
+          this.scaleReady,
+        );
+        this.scaleReady = true;
       }
       this.applyAttachedScale();
     }

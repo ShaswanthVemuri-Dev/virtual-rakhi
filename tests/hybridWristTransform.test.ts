@@ -1,28 +1,27 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { canRetainRightPose, medianWristScale, translatePoseMatrix, wristScaleSample } from '../src/ar/rakhi3dRenderer';
+import { canRetainRightPose, fitHybridWristScale, projectRingDiameter, translatePoseMatrix } from '../src/ar/rakhi3dRenderer';
 
 describe('hybrid Google + VTO wrist transform', () => {
-  it('rejects foreshortened scale solves and freezes a bounded median', () => {
-    expect(wristScaleSample(.006, .1, .95)).toBeNull();
-    expect(wristScaleSample(.04, .1, .95)).toBeNull();
-    expect(wristScaleSample(.1, .1, .4)).toBeNull();
-    expect(wristScaleSample(.1, .108, .9)).toBeCloseTo(1.08, 5);
-    expect(medianWristScale([1.03, 1.08, 7, 1.05, 1.04])).toBeCloseTo(1.05, 5);
-    expect(medianWristScale([1, 1, 1, 1])).toBeNull();
+  it('corrects an oversized VTO solve in the same frame', () => {
+    expect(fitHybridWristScale(.8, .08, 1, false)).toBeCloseTo(.1, 5);
+    expect(fitHybridWristScale(.1, .105, 1, true)).toBeCloseTo(1.016, 5);
+    expect(fitHybridWristScale(Number.NaN, .1, .9, true)).toBe(.9);
   });
 
-  it('cannot turn an edge-on wrist projection into an oversized Rakhi', () => {
+  it('measures and fits the whole ring at front, diagonal, and edge-on angles', () => {
     const camera = new THREE.PerspectiveCamera(40, 16 / 9, .1, 1000);
-    const wrist = new THREE.Object3D();
-    wrist.position.z = -20;
-    wrist.rotation.y = THREE.MathUtils.degToRad(89);
-    wrist.updateMatrixWorld(true);
-    const project = (x: number) => new THREE.Vector3(x, 0, 0).applyMatrix4(wrist.matrixWorld).project(camera);
-    const left = project(-4.22);
-    const right = project(4.22);
-    const diameter = Math.hypot(right.x - left.x, right.y - left.y);
-    expect(wristScaleSample(diameter, .1, .95)).toBeNull();
+    [0, 45, 89].forEach((degrees) => {
+      const wrist = new THREE.Object3D();
+      wrist.position.z = -20;
+      wrist.rotation.y = THREE.MathUtils.degToRad(degrees);
+      wrist.updateMatrixWorld(true);
+      const diameter = projectRingDiameter(wrist, camera);
+      expect(diameter).not.toBeNull();
+      expect(diameter!).toBeGreaterThan(.1);
+      const scale = fitHybridWristScale(diameter!, .08, 1, false);
+      expect(diameter! * scale).toBeCloseTo(.08, 5);
+    });
   });
 
   it('holds only a previously proven right-hand pose during a brief VTO miss', () => {

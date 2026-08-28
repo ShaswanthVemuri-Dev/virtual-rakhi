@@ -6,7 +6,7 @@ describe('RTC ceremony messages', () => {
   it('rejects unknown/unstructured data channel input', () => {
     expect(isCeremonyMessage(null)).toBe(false);
     expect(isCeremonyMessage({ type: 'DELETE_EVERYTHING' })).toBe(false);
-    expect(isCeremonyMessage({ type: 'BLESSING', timestamp: 1 })).toBe(true);
+    expect(isCeremonyMessage({ type: 'BLESSING', timestamp: 1, target: 'GIVER' })).toBe(true);
   });
 
   it('rounds high-frequency hand packets without changing articulation', () => {

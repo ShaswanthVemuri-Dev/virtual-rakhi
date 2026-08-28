@@ -24,6 +24,8 @@ const activeHandStates = new Set<RakhiTyingState>([
   'POSITIONING',
   'APPROACHING_WRIST',
   'ALIGNMENT_VALID',
+  'WAIT_FOR_HAND_CONTACT',
+  'TYING_GESTURE',
   'FINISHING_ANIMATION',
 ]);
 
@@ -55,8 +57,10 @@ export class CeremonyRenderer {
       this.tilak.draw(ctx, face.value, face.alpha, mirrored);
     }
 
-    const targetWrist = options.frozenWrist ?? wrist.value;
-    if ((activeHandStates.has(options.rakhiState) || options.handAlpha !== undefined) && targetWrist) {
+    // The sister's hands belong to the shared canvas, not the wrist tracker.
+    // A brief receiver-wrist miss must never hide an otherwise valid hand feed.
+    if ((activeHandStates.has(options.rakhiState) || options.handAlpha !== undefined)
+      && frame.normalizedHands.length) {
       this.drawHands(ctx, frame.normalizedHands, options.rakhiState, handMirrored, options.handAlpha);
     }
 

@@ -97,6 +97,7 @@ export default function NetworkCeremonyApp() {
   const compositeSendingRef = useRef(false);
   const compositeReplacePendingRef = useRef(false);
   const lastCompositeAttemptRef = useRef(-Infinity);
+  const lastCompositeDrawRef = useRef(-Infinity);
   const messageHandlerRef = useRef<(message: CeremonyMessage) => void>(() => undefined);
   const connectionHandlerRef = useRef<(state: ConnectionState) => void>(() => undefined);
 
@@ -200,6 +201,7 @@ export default function NetworkCeremonyApp() {
     compositeStreamRef.current = null;
     compositeSendingRef.current = false;
     compositeReplacePendingRef.current = false;
+    lastCompositeDrawRef.current = -Infinity;
     connectedRef.current = false;
   };
 
@@ -594,14 +596,18 @@ export default function NetworkCeremonyApp() {
         const broadcastOverlay = broadcastOverlayCanvasRef.current;
         const broadcastCanvas = broadcastCanvasRef.current;
         const rakhiCanvas = rakhi3dCanvasRef.current;
-        if (broadcastOverlay && broadcastCanvas && rakhiCanvas && trackingVideo.readyState >= 2) {
-          fitCanvasToVideo(broadcastOverlay, trackingVideo);
+        if (broadcastOverlay && broadcastCanvas && rakhiCanvas && trackingVideo.readyState >= 2
+          && now - lastCompositeDrawRef.current >= 1000 / 24) {
+          lastCompositeDrawRef.current = now;
+          // The outgoing composite does not need the full tracking resolution.
+          // 960px preserves call quality while cutting its pixel work nearly in half.
+          fitCanvasToVideo(broadcastOverlay, trackingVideo, 960);
           broadcastRendererRef.current.draw(broadcastOverlay, composed, faceHeld, wristHeld, {
             ...renderOptions,
             mirrored: false,
             handMirrored: false,
           });
-          fitCanvasToVideo(broadcastCanvas, trackingVideo);
+          fitCanvasToVideo(broadcastCanvas, trackingVideo, 960);
           const output = broadcastCanvas.getContext('2d');
           if (output) {
             output.clearRect(0, 0, broadcastCanvas.width, broadcastCanvas.height);
@@ -611,7 +617,7 @@ export default function NetworkCeremonyApp() {
           }
 
           if (!compositeStreamRef.current && typeof broadcastCanvas.captureStream === 'function') {
-            const captured = broadcastCanvas.captureStream(30);
+            const captured = broadcastCanvas.captureStream(24);
             const videoTrack = captured.getVideoTracks()[0];
             if (videoTrack) {
               compositeStreamRef.current = new MediaStream([
