@@ -6,6 +6,8 @@ import { createFaceLandmarker } from './modelFactory';
 
 export class FaceTracker {
   private detector: FaceLandmarker | null = null;
+  private initPromise: Promise<void> | null = null;
+  private generation = 0;
   private lastInference = -Infinity;
   private readonly intervalMs = 1000 / 15;
   private readonly smoother = new LandmarkSmoother();
@@ -16,7 +18,15 @@ export class FaceTracker {
   readonly rate = new RateMeter();
 
   async init() {
-    if (!this.detector) this.detector = await createFaceLandmarker();
+    if (this.detector) return;
+    if (!this.initPromise) {
+      const generation = this.generation;
+      this.initPromise = createFaceLandmarker().then((detector) => {
+        if (generation === this.generation) this.detector = detector;
+        else detector.close();
+      }).finally(() => { this.initPromise = null; });
+    }
+    await this.initPromise;
   }
 
   async process(video: HTMLVideoElement, now: number): Promise<{ anchor: FaceAnchor | null; landmarks: Vec3[] } | null> {
@@ -60,6 +70,7 @@ export class FaceTracker {
   }
 
   close() {
+    this.generation += 1;
     this.detector?.close();
     this.detector = null;
     this.smoother.clear();

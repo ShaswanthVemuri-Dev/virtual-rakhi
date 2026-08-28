@@ -61,7 +61,9 @@ export class RakhiTyingMachine {
     if (this.state === 'WAIT_FOR_RECEIVER_WRIST') {
       if (!wrist || wrist.confidence < .62) { this.stableSince = -1; return this.snapshot(); }
       if (this.stableSince < 0) this.stableSince = now;
-      if (now - this.stableSince >= 350) {
+      // Two normal 65 ms wrist packets reject a one-frame false positive
+      // without making the sister wait for the independent 3D pose solver.
+      if (now - this.stableSince >= 130) {
         this.setState('WAIT_FOR_GIVER_HANDS', now);
         return this.snapshot({ captureWrist: wrist });
       }

@@ -84,6 +84,7 @@ export default function NetworkCeremonyApp() {
   const aartiStartRef = useRef<number | null>(null);
   const tilakStartRef = useRef<number | null>(null);
   const faceStableSinceRef = useRef<number | null>(null);
+  const faceWarmupStartedRef = useRef(false);
   const sessionStartAtRef = useRef(0);
   const sessionDurationRef = useRef(20 * 60);
   const lastUiRef = useRef(0);
@@ -115,6 +116,7 @@ export default function NetworkCeremonyApp() {
   const [rakhiInstruction, setRakhiInstruction] = useState('Ready to begin Rakhi tying.');
   const [rakhiProgress, setRakhiProgress] = useState(0);
   const [faceActivated, setFaceActivated] = useState(false);
+  const [wristActivated, setWristActivated] = useState(false);
   const [giverHandsActive, setGiverHandsActive] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('Create a private room or enter a room code to join.');
@@ -133,8 +135,8 @@ export default function NetworkCeremonyApp() {
 
   const totalDuration = useMemo(() => parseCallDurationSeconds(), []);
   const computedFeatures = useMemo(() => deriveNetworkVisionFeatures(role, {
-    faceActivated, giverHandsActive, rakhiState,
-  }), [role, faceActivated, giverHandsActive, rakhiState]);
+    faceActivated, wristActivated, giverHandsActive, rakhiState,
+  }), [role, faceActivated, wristActivated, giverHandsActive, rakhiState]);
   const receiverFocus = role === 'RECEIVER' && (activeRitual !== null || tilakApplied || rakhiAttached);
   const localIsMain = blessingTarget ? role === blessingTarget : receiverFocus;
 
@@ -214,6 +216,7 @@ export default function NetworkCeremonyApp() {
     setRakhiInstruction('Ready to begin Rakhi tying.');
     setRakhiProgress(0);
     setFaceActivated(false);
+    setWristActivated(false);
     setGiverHandsActive(false);
     remoteFaceRef.current = null;
     retainedTilakFaceRef.current = null;
@@ -224,6 +227,7 @@ export default function NetworkCeremonyApp() {
     aartiStartRef.current = null;
     tilakStartRef.current = null;
     faceStableSinceRef.current = null;
+    faceWarmupStartedRef.current = false;
     handFadeStartRef.current = null;
     if (blessingTimerRef.current !== null) window.clearTimeout(blessingTimerRef.current);
     blessingTimerRef.current = null;
@@ -316,15 +320,17 @@ export default function NetworkCeremonyApp() {
 
   const beginRemoteAarti = () => {
     aartiStartRef.current = performance.now();
+    faceStableSinceRef.current = null;
+    faceWarmupStartedRef.current = false;
     setActiveRitual('AARTI');
     setNotice('Aarti is running automatically on both screens.');
   };
 
   const beginRemoteTilak = () => {
     setFaceActivated(true);
+    setWristActivated(true);
     setTilakFlow('WAIT_FACE');
     setActiveRitual('TILAK');
-    faceStableSinceRef.current = null;
     setNotice(roleRef.current === 'RECEIVER' ? 'Look toward the camera and hold steady for face lock.' : 'Waiting for the receiver face to lock…');
   };
 
@@ -439,6 +445,20 @@ export default function NetworkCeremonyApp() {
       const giverHands = roleRef.current === 'GIVER' ? mirrorHandsForCanvas(local.hands) : [];
       if (roleRef.current === 'RECEIVER' && local.faceAnchor) retainedTilakFaceRef.current = local.faceAnchor;
 
+      const aartiWarmup = activeRitualRef.current === 'AARTI' && aartiStartRef.current !== null
+        && now - aartiStartRef.current >= AARTI_DURATION_MS * .5;
+      if (roleRef.current === 'RECEIVER' && aartiWarmup && !faceWarmupStartedRef.current) {
+        faceWarmupStartedRef.current = true;
+        setFaceActivated(true);
+      }
+      // Keep a hidden stable face lock during the second half of Aarti so the
+      // Tilak animation does not pay model startup plus another stability wait.
+      if (roleRef.current === 'RECEIVER' && faceActivated && tilakFlowRef.current === 'IDLE') {
+        if (local.faceAnchor && local.faceAnchor.confidence >= .7) {
+          if (faceStableSinceRef.current === null) faceStableSinceRef.current = now;
+        } else faceStableSinceRef.current = null;
+      }
+
       const vto = rakhi3dRef.current;
       if (roleRef.current === 'RECEIVER' && tilakFlowRef.current !== 'IDLE' && vto && !vtoStartRef.current && wristTrackingVideo.readyState >= 2) {
         vtoStartRef.current = true;
@@ -485,7 +505,9 @@ export default function NetworkCeremonyApp() {
         lastAnchorSendRef.current = now;
         if (roleRef.current === 'RECEIVER') {
           if (faceActivated) send({ type: 'FACE_ANCHOR', payload: local.faceAnchor });
-          if (activeRitualRef.current === 'RAKHI') send({ type: 'WRIST_ANCHOR', payload: localWrist });
+          // Sister readiness follows Google's responsive 2D wrist immediately;
+          // WebAR remains local and only supplies the brother's 3D render pose.
+          if (activeRitualRef.current === 'RAKHI') send({ type: 'WRIST_ANCHOR', payload: positionHeld.value });
         } else if (giverHandsActive) {
           send({ type: 'GIVER_HANDS', payload: compactHands(giverHands) });
         }

@@ -6,13 +6,23 @@ import { normalizeHands } from '../rakhi/handRetargeting';
 
 export class HandTracker {
   private detector: HandLandmarker | null = null;
+  private initPromise: Promise<void> | null = null;
+  private generation = 0;
   private lastInference = -Infinity;
   private readonly intervalMs = 1000 / 27;
   private readonly smoother = new LandmarkSmoother();
   readonly rate = new RateMeter();
 
   async init() {
-    if (!this.detector) this.detector = await createHandLandmarker();
+    if (this.detector) return;
+    if (!this.initPromise) {
+      const generation = this.generation;
+      this.initPromise = createHandLandmarker().then((detector) => {
+        if (generation === this.generation) this.detector = detector;
+        else detector.close();
+      }).finally(() => { this.initPromise = null; });
+    }
+    await this.initPromise;
   }
 
   async process(video: HTMLVideoElement, now: number): Promise<{ hands: TrackedHand[]; normalizedHands: NormalizedHand[] } | null> {
@@ -43,6 +53,7 @@ export class HandTracker {
   }
 
   close() {
+    this.generation += 1;
     this.detector?.close();
     this.detector = null;
     this.smoother.clear();

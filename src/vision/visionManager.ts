@@ -48,12 +48,15 @@ export class VisionManager {
       this.latest.normalizedHands = [];
     }
 
-    const boots: Promise<void>[] = [];
-    if (!this.features.face && next.face) boots.push(this.face.init());
-    if (!this.features.wrist && next.wrist) boots.push(this.wrist.init());
-    if (!this.features.hands && next.hands) boots.push(this.hands.init());
-    await Promise.all(boots);
+    // Activate independently: a ready face or hand must not wait for another
+    // model's download/initialization before it can begin processing frames.
+    const previous = this.features;
     this.features = { ...next };
+    const boots: Promise<void>[] = [];
+    if (!previous.face && next.face) boots.push(this.face.init());
+    if (!previous.wrist && next.wrist) boots.push(this.wrist.init());
+    if (!previous.hands && next.hands) boots.push(this.hands.init());
+    await Promise.all(boots);
   }
 
   getFeatures(): VisionFeatures {

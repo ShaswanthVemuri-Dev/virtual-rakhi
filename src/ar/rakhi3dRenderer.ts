@@ -49,14 +49,19 @@ const loadRuntime = () => runtimePromise ??= (async () => {
   }
 })();
 
-export const fitHybridWristScale = (vtoWidth: number, targetWidth: number, previous: number, ready: boolean) => {
-  if (![vtoWidth, targetWidth, previous].every(Number.isFinite) || vtoWidth <= 0 || targetWidth <= 0) return previous;
-  const measured = THREE.MathUtils.clamp(targetWidth / vtoWidth, .02, 12);
-  if (!ready) return measured;
-  const change = measured / Math.max(previous, .001);
-  // A large ratio is a VTO depth/scale reacquisition, not normal wrist motion.
-  // Snap it to the Google screen width so an oversized torus never crosses the frame.
-  return change < .6 || change > 1.67 ? measured : THREE.MathUtils.lerp(previous, measured, .4);
+export const wristScaleSample = (vtoDiameter: number, targetWidth: number, dorsalFacing = 1) => {
+  if (![vtoDiameter, targetWidth, dorsalFacing].every(Number.isFinite)
+    || vtoDiameter < .03 || targetWidth <= 0 || dorsalFacing < .65) return null;
+  const ratio = targetWidth / vtoDiameter;
+  // Reject foreshortened projections. WebAR remains the scale authority unless
+  // both trackers already agree within a normal wrist-size adjustment.
+  return ratio >= .72 && ratio <= 1.28 ? ratio : null;
+};
+
+export const medianWristScale = (samples: number[]) => {
+  if (samples.length < 5) return null;
+  const sorted = [...samples].sort((a, b) => a - b);
+  return THREE.MathUtils.clamp(sorted[Math.floor(sorted.length / 2)], .8, 1.2);
 };
 
 export const canRetainRightPose = (hasPose: boolean, positionConfidence: number, missingForMs: number) =>
@@ -82,7 +87,8 @@ export class Rakhi3DRenderer {
   private positionAnchor: WristAnchor | null = null;
   private lastRightPose: THREE.Matrix4 | null = null;
   private fittedScale = 1;
-  private scaleReady = false;
+  private scaleSamples: number[] = [];
+  private scaleLocked = false;
   private trackerDepth = .92;
   private lastTrackedAt = -Infinity;
   private hands: NormalizedHand[] = [];
@@ -268,14 +274,14 @@ export class Rakhi3DRenderer {
     const right = project(new THREE.Vector3(4.22, 0, 0));
     const bottom = project(new THREE.Vector3(0, 0, -2));
     const top = project(new THREE.Vector3(0, 0, 2));
-    const wristWidth = Math.hypot(right.x - left.x, right.y - left.y) / 2;
+    const wristWidth = Math.hypot(right.x - left.x, right.y - left.y);
     const axis = { x: top.x - bottom.x, y: bottom.y - top.y };
     const axisLength = Math.hypot(axis.x, axis.y) || 1;
     const direction = { x: axis.x / axisLength, y: axis.y / axisLength };
     this.anchor = {
       x: (center.x + 1) / 2,
       y: (1 - center.y) / 2,
-      scale: THREE.MathUtils.clamp(wristWidth * 2.05, .07, .32),
+      scale: THREE.MathUtils.clamp(wristWidth * 1.025, .07, .32),
       wristWidth: THREE.MathUtils.clamp(wristWidth, .03, .16),
       angle: Math.atan2(direction.y, direction.x) + Math.PI / 2,
       forearmDirection: direction,
@@ -286,6 +292,7 @@ export class Rakhi3DRenderer {
   draw(hands: NormalizedHand[], state: RakhiTyingState, mirrored: boolean) {
     this.hands = hands;
     this.state = state;
+    if (state === 'FINISHING_ANIMATION' || state === 'RAKHI_ATTACHED') this.scaleLocked = true;
     this.canvas.classList.toggle('mirrored-rakhi', mirrored);
     this.updateVisibility();
     this.placeCarried();
@@ -309,19 +316,23 @@ export class Rakhi3DRenderer {
       .035,
       .14,
     );
-    if (targetWidth > .005) {
+    if (!this.scaleLocked && targetWidth > .005) {
       this.attached.scale.setScalar(1);
       this.occluder?.scale.setScalar(1);
       this.three.scene.updateMatrixWorld(true);
       const left = this.attached.localToWorld(new THREE.Vector3(-4.22, 0, 0)).project(camera);
       const right = this.attached.localToWorld(new THREE.Vector3(4.22, 0, 0)).project(camera);
-      const vtoWidth = Math.hypot(right.x - left.x, right.y - left.y) / 2;
-      if (vtoWidth > .001 && Number.isFinite(vtoWidth)) {
-        this.fittedScale = fitHybridWristScale(vtoWidth, targetWidth, this.fittedScale, this.scaleReady);
-        this.scaleReady = true;
-        this.attached.scale.setScalar(this.fittedScale);
-        this.occluder?.scale.setScalar(this.fittedScale);
+      const sample = wristScaleSample(
+        Math.hypot(right.x - left.x, right.y - left.y),
+        targetWidth,
+        this.positionAnchor.dorsalFacing,
+      );
+      if (sample !== null) {
+        this.scaleSamples.push(sample);
+        if (this.scaleSamples.length > 9) this.scaleSamples.shift();
+        this.fittedScale = medianWristScale(this.scaleSamples) ?? 1;
       }
+      this.applyAttachedScale();
     }
 
     this.three.scene.updateMatrixWorld(true);
@@ -338,6 +349,17 @@ export class Rakhi3DRenderer {
     translatePoseMatrix(parent.matrix, delta);
     parent.matrixWorldNeedsUpdate = true;
     this.three.scene.updateMatrixWorld(true);
+  }
+
+  private applyAttachedScale() {
+    this.attached?.scale.setScalar(this.fittedScale);
+    this.occluder?.scale.setScalar(this.fittedScale);
+    const material = this.occluder?.material;
+    if (material instanceof THREE.ShaderMaterial) {
+      material.uniforms.radius.value = 4.55 * this.fittedScale;
+      material.uniforms.dr.value = .55 * this.fittedScale;
+      material.uniforms.drv.value = .55 * this.fittedScale;
+    }
   }
 
   private updateVisibility() {

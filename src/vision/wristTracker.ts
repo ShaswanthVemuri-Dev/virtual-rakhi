@@ -35,6 +35,9 @@ export const chooseRightHandIndex = (hands: Vec3[][], poseWrist: Vec3 | null, pr
 export class WristTracker {
   private pose: PoseLandmarker | null = null;
   private hand: HandLandmarker | null = null;
+  private poseInitPromise: Promise<void> | null = null;
+  private handInitPromise: Promise<void> | null = null;
+  private generation = 0;
   private lastInference = -Infinity;
   private lastPoseInference = -Infinity;
   private readonly intervalMs = 1000 / 24;
@@ -54,13 +57,30 @@ export class WristTracker {
   readonly rate = new RateMeter();
 
   async init() {
-    if (!this.pose || !this.hand) [this.pose, this.hand] = await Promise.all([createPoseLandmarker(), createHandLandmarker(2)]);
+    const generation = this.generation;
+    if (!this.hand && !this.handInitPromise) {
+      this.handInitPromise = createHandLandmarker(2).then((hand) => {
+        if (generation === this.generation) this.hand = hand;
+        else hand.close();
+      }).finally(() => { this.handInitPromise = null; });
+    }
+    if (!this.pose && !this.poseInitPromise) {
+      this.poseInitPromise = createPoseLandmarker().then((pose) => {
+        if (generation === this.generation) this.pose = pose;
+        else pose.close();
+      }).catch((cause) => {
+        // Pose only verifies anatomical side at distance. Hand landmarks remain
+        // the required, responsive wrist-position source at close range.
+        console.warn('Optional Pose Landmarker could not start.', cause);
+      }).finally(() => { this.poseInitPromise = null; });
+    }
+    await this.handInitPromise;
   }
 
   async process(video: HTMLVideoElement, now: number): Promise<{ anchor: WristAnchor | null; landmarks: Vec3[] } | null> {
-    if (!this.pose || !this.hand || now - this.lastInference < this.intervalMs || video.readyState < 2) return null;
+    if (!this.hand || now - this.lastInference < this.intervalMs || video.readyState < 2) return null;
     this.lastInference = now;
-    if (now - this.lastPoseInference >= this.poseIntervalMs) {
+    if (this.pose && now - this.lastPoseInference >= this.poseIntervalMs) {
       this.lastPoseInference = now;
       const poseResult = this.pose.detectForVideo(video, now);
       const raw = poseResult.landmarks?.[0];
@@ -141,6 +161,7 @@ export class WristTracker {
   }
 
   close() {
+    this.generation += 1;
     this.pose?.close(); this.hand?.close(); this.pose = null; this.hand = null;
     this.smoother.clear(); this.wristPose.reset(); this.rate.reset();
     [this.xFilter, this.yFilter, this.scaleFilter, this.angleFilter, this.widthFilter, this.facingFilter].forEach((filter) => filter.reset());
