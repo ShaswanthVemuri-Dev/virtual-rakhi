@@ -62,6 +62,7 @@ export class Rakhi3DRenderer {
   private carried: THREE.Group | null = null;
   private anchor: WristAnchor | null = null;
   private positionAnchor: WristAnchor | null = null;
+  private trackerDepth = .92;
   private lastTrackedAt = -Infinity;
   private hands: NormalizedHand[] = [];
   private state: RakhiTyingState = 'IDLE';
@@ -220,7 +221,13 @@ export class Rakhi3DRenderer {
     if (!detectState.isDetected && now - this.lastTrackedAt <= 700) return;
     if (!rightWrist || !this.three || !this.attached) {
       this.anchor = null;
-      if (this.three?.trackersParent[0]) this.three.trackersParent[0].visible = false;
+      const parent = this.three?.trackersParent[0];
+      if (parent && this.three && this.positionAnchor?.confidence && this.positionAnchor.confidence >= .42) {
+        parent.visible = true;
+        this.alignTrackerToLandmark(parent, this.three.camera);
+        this.updateVisibility();
+        this.placeCarried();
+      } else if (parent) parent.visible = false;
       return;
     }
     this.lastTrackedAt = now;
@@ -228,7 +235,7 @@ export class Rakhi3DRenderer {
     parent.visible = true;
     this.three.scene.updateMatrixWorld(true);
     const camera = this.three.camera;
-    this.alignTrackerPosition(parent, camera);
+    this.alignTrackerToLandmark(parent, camera);
     const project = (point: THREE.Vector3) => this.attached!.localToWorld(point).project(camera);
     const center = project(new THREE.Vector3());
     const left = project(new THREE.Vector3(-4.22, 0, 0));
@@ -267,44 +274,64 @@ export class Rakhi3DRenderer {
   setPositionAnchor(anchor: WristAnchor | null) {
     this.positionAnchor = anchor;
     const parent = this.three?.trackersParent[0];
-    if (parent?.visible && this.three) this.alignTrackerPosition(parent, this.three.camera);
+    if (!parent || !this.three || !anchor || anchor.confidence < .42) return;
+    // Keep the last reliable VTO rotation while MediaPipe landmark 0 continues
+    // to provide a valid wrist position.
+    parent.visible = true;
+    this.alignTrackerToLandmark(parent, this.three.camera);
+    this.updateVisibility();
   }
 
-  private alignTrackerPosition(parent: THREE.Object3D, camera: THREE.PerspectiveCamera) {
+  private alignTrackerToLandmark(parent: THREE.Object3D, camera: THREE.PerspectiveCamera) {
     if (!this.positionAnchor || this.positionAnchor.confidence < .42 || !this.attached || !this.three) return;
+    // HandTrackerThreeHelper owns a matrixAutoUpdate=false parent. Mutating
+    // parent.position is therefore ignored; correct its matrix translation.
+    this.attached.scale.setScalar(1);
     this.three.scene.updateMatrixWorld(true);
+    const left = this.attached.localToWorld(new THREE.Vector3(-4.22, 0, 0)).project(camera);
+    const right = this.attached.localToWorld(new THREE.Vector3(4.22, 0, 0)).project(camera);
+    const renderedWidth = Math.hypot(right.x - left.x, right.y - left.y) / 2;
+    const targetWidth = this.positionAnchor.wristWidth ?? this.positionAnchor.scale * .42;
+    if (renderedWidth > .001) {
+      this.attached.scale.setScalar(THREE.MathUtils.clamp(targetWidth / renderedWidth, .45, 2.4));
+      this.three.scene.updateMatrixWorld(true);
+    }
     const currentWorld = this.attached.localToWorld(new THREE.Vector3());
     const currentNdc = currentWorld.clone().project(camera);
+    if (![currentNdc.x, currentNdc.y, currentNdc.z].every(Number.isFinite)) return;
+    this.trackerDepth = THREE.MathUtils.clamp(currentNdc.z, -.95, .98);
     const targetWorld = new THREE.Vector3(
       this.positionAnchor.x * 2 - 1,
       1 - this.positionAnchor.y * 2,
-      currentNdc.z,
+      this.trackerDepth,
     ).unproject(camera);
-    parent.position.add(targetWorld.sub(currentWorld));
+    const delta = targetWorld.sub(currentWorld);
+    parent.matrix.elements[12] += delta.x;
+    parent.matrix.elements[13] += delta.y;
+    parent.matrix.elements[14] += delta.z;
+    parent.matrixWorldNeedsUpdate = true;
     this.three.scene.updateMatrixWorld(true);
   }
 
   private updateVisibility() {
     if (!this.attached || !this.carried) return;
-    this.attached.visible = !!this.anchor && (this.state === 'FINISHING_ANIMATION' || this.state === 'RAKHI_ATTACHED');
-    this.carried.visible = !!this.anchor && ['APPROACHING_WRIST', 'ALIGNMENT_VALID'].includes(this.state) && this.hands.length === 2;
+    this.attached.visible = !!this.positionAnchor && (this.state === 'FINISHING_ANIMATION' || this.state === 'RAKHI_ATTACHED');
+    this.carried.visible = ['POSITIONING', 'APPROACHING_WRIST', 'ALIGNMENT_VALID'].includes(this.state) && this.hands.length === 2;
   }
 
   private placeCarried() {
-    if (!this.carried?.visible || !this.anchor || !this.three) return;
-    const placement = rakhiPlacement(this.hands, this.anchor);
+    if (!this.carried?.visible || !this.three) return;
+    const placement = rakhiPlacement(this.hands);
     if (!placement) return;
     const camera = this.three.camera;
-    const screenToWorld = (x: number, y: number) => {
-      const point = new THREE.Vector3(x * 2 - 1, 1 - y * 2, .5).unproject(camera);
-      return camera.position.clone().add(point.sub(camera.position).normalize().multiplyScalar(12));
-    };
+    const screenToWorld = (x: number, y: number) =>
+      new THREE.Vector3(x * 2 - 1, 1 - y * 2, this.trackerDepth).unproject(camera);
     const center = screenToWorld(placement.center.x, placement.center.y);
     const edge = screenToWorld(placement.center.x + placement.span / 2, placement.center.y);
     this.carried.position.copy(center);
     this.carried.quaternion.copy(camera.quaternion);
     this.carried.rotateZ(-placement.angle);
-    this.carried.scale.setScalar(THREE.MathUtils.clamp(center.distanceTo(edge) / 1.6, .28, 1.45));
+    this.carried.scale.setScalar(THREE.MathUtils.clamp(center.distanceTo(edge) / 1.6, .03, 3));
   }
 
   private sizeCanvases(notify: boolean) {

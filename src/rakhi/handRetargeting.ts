@@ -113,7 +113,7 @@ export const restoreHandsToCanvas = (hands: NormalizedHand[]) => hands.map((hand
 });
 
 /** The on-screen Rakhi position shared by rendering and attachment logic. */
-export const rakhiPlacement = (hands: NormalizedHand[], wrist: WristAnchor) => {
+export const rakhiPlacement = (hands: NormalizedHand[], wrist?: WristAnchor | null) => {
   if (hands.length !== 2) return null;
   const pinches = restoreHandsToCanvas(hands).map((points) => ({
     x: ((points[4]?.x ?? points[0].x) + (points[8]?.x ?? points[0].x)) / 2,
@@ -124,6 +124,6 @@ export const rakhiPlacement = (hands: NormalizedHand[], wrist: WristAnchor) => {
     center,
     span: Math.hypot(pinches[1].x - pinches[0].x, pinches[1].y - pinches[0].y),
     angle: Math.atan2(pinches[1].y - pinches[0].y, pinches[1].x - pinches[0].x),
-    wristDistance: Math.hypot(center.x - wrist.x, center.y - wrist.y),
+    wristDistance: wrist ? Math.hypot(center.x - wrist.x, center.y - wrist.y) : Number.POSITIVE_INFINITY,
   };
 };
