@@ -25,7 +25,7 @@ describe('RakhiTyingMachine', () => {
     const machine = new RakhiTyingMachine();
     expect(machine.start().state).toBe('WAIT_FOR_RECEIVER_WRIST');
     machine.update(0, wrist, []);
-    const captured = machine.update(370, wrist, []);
+    const captured = machine.update(140, wrist, []);
     expect(captured.state).toBe('WAIT_FOR_GIVER_HANDS');
     expect(captured.captureWrist).toBeTruthy();
 
@@ -41,7 +41,7 @@ describe('RakhiTyingMachine', () => {
     const machine = new RakhiTyingMachine();
     machine.start();
     machine.update(0, wrist, []);
-    machine.update(400, wrist, []);
+    machine.update(140, wrist, []);
     machine.update(500, wrist, makeHands(0.5, 0.08));
     expect(machine.getState()).toBe('POSITIONING');
     expect(machine.update(1200, wrist, makeHands(0.5, 0.08)).state).toBe('POSITIONING');
@@ -51,7 +51,7 @@ describe('RakhiTyingMachine', () => {
     const machine = new RakhiTyingMachine();
     machine.start();
     machine.update(0, wrist, [], true);
-    expect(machine.update(400, wrist, [], true).state).toBe('WAIT_FOR_GIVER_HANDS');
+    expect(machine.update(140, wrist, [], true).state).toBe('WAIT_FOR_GIVER_HANDS');
     expect(machine.update(500, null, makeHands(0.5, 0.3, true), true).state).toBe('WAIT_FOR_RECEIVER_WRIST');
   });
 });
