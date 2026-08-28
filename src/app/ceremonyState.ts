@@ -15,8 +15,8 @@ export const deriveNetworkVisionFeatures = (
   state: CeremonyVisionState,
 ): VisionFeatures => ({
   face: role === 'RECEIVER' && state.faceActivated,
-  // Phase 3 uses the wrist-specific VTO tracker on the displayed receiver feed.
-  wrist: false,
+  // Landmark translation complements the VTO tracker's 3D rotation.
+  wrist: role === 'RECEIVER' && state.rakhiState !== 'IDLE',
   hands: role === 'GIVER' && state.giverHandsActive,
 });
 

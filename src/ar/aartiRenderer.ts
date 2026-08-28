@@ -21,7 +21,7 @@ export class AartiRenderer {
     const p = clamp01(progress);
     const width = ctx.canvas.width;
     const height = ctx.canvas.height;
-    const assetSize = Math.min(width * .42, height * .58);
+    const assetSize = Math.min(width * .4, height * .54);
 
     // Enter from below/depth, make three human-paced clockwise turns, then
     // return to the same lower point and recede. No opacity trick is used.
@@ -30,20 +30,20 @@ export class AartiRenderer {
     const orbit = clamp01((p - .12) / .76);
     const turnAngle = Math.PI / 2 + orbit * Math.PI * 6;
     const baseX = width * .5;
-    const baseY = height * .5;
+    const baseY = height * .65;
     let x = baseX + Math.cos(turnAngle) * width * .15;
-    let y = baseY + Math.sin(turnAngle) * height * .2;
+    let y = baseY + Math.sin(turnAngle) * height * .06;
     let depthScale = 1;
 
     if (entering) {
       const t = smoothstep(p / .12);
       x = baseX;
-      y = height + assetSize * .18 + (height * .7 - height - assetSize * .18) * t;
+      y = height + assetSize * .18 + (height * .71 - height - assetSize * .18) * t;
       depthScale = .58 + .42 * t;
     } else if (exiting) {
       const t = smoothstep((p - .88) / .12);
       x = baseX;
-      y = height * .7 + (height + assetSize * .18 - height * .7) * t;
+      y = height * .71 + (height + assetSize * .18 - height * .71) * t;
       depthScale = 1 - .42 * t;
     }
 

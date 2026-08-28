@@ -18,6 +18,7 @@ import CeremonyGuide from '../components/CeremonyGuide';
 import BlessingBurst from '../components/BlessingBurst';
 import WristPoseGuide from '../components/WristPoseGuide';
 import type { Rakhi3DRenderer } from '../ar/rakhi3dRenderer';
+import { fuseWristAnchors } from '../vision/wristPose';
 import { Microphone01 } from '@untitledui/icons/Microphone01';
 import { MicrophoneOff01 } from '@untitledui/icons/MicrophoneOff01';
 import { Camera01 } from '@untitledui/icons/Camera01';
@@ -400,7 +401,9 @@ export default function NetworkCeremonyApp() {
     let cancelled = false;
     managerRef.current.setFeatures(computedFeatures).then(() => {
       if (cancelled) return;
-      if (roleRef.current === 'GIVER') return managerRef.current.preloadHands();
+      return roleRef.current === 'GIVER'
+        ? managerRef.current.preloadHands()
+        : managerRef.current.preloadWrist();
     }).catch((cause) => {
       console.error(cause);
       if (!cancelled) setError('A local vision model could not load. Refresh and confirm the camera is available.');
@@ -432,8 +435,10 @@ export default function NetworkCeremonyApp() {
           setError('Right-wrist tracking could not start. Keep the camera on and refresh the call.');
         });
       }
-      const localWrist = vto?.getAnchor() ?? null;
-      const wristCandidate = roleRef.current === 'GIVER' ? remoteWristRef.current ?? localWrist : localWrist;
+      const landmarkWrist = roleRef.current === 'RECEIVER' ? local.wristAnchor : remoteWristRef.current;
+      vto?.setPositionAnchor(landmarkWrist);
+      const localWrist = fuseWristAnchors(landmarkWrist, vto?.getAnchor() ?? null);
+      const wristCandidate = localWrist;
       const wristHeld = wristRetentionRef.current.update(wristCandidate, now);
       const trackedWrist = wristHeld.value;
 
@@ -478,7 +483,6 @@ export default function NetworkCeremonyApp() {
 
       if (activeRitualRef.current === 'TILAK' && tilakFlowRef.current === 'ANIMATING' && tilakStartRef.current !== null && now - tilakStartRef.current >= TILAK_DURATION_MS) {
         if (roleRef.current === 'RECEIVER') send({ type: 'TILAK_APPLIED', timestamp: Date.now() });
-        setFaceActivated(false);
         setTilakApplied(true);
         setTilakFlow('DONE');
         setActiveRitual(null);

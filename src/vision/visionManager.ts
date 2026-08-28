@@ -64,6 +64,10 @@ export class VisionManager {
     return this.hands.init();
   }
 
+  preloadWrist() {
+    return this.wrist.init();
+  }
+
   async process(video: HTMLVideoElement, now: number): Promise<Phase1Frame> {
     this.renderRate.tick(now);
     const jobs: Promise<void>[] = [];

@@ -59,6 +59,7 @@ export class Rakhi3DRenderer {
   private attached: THREE.Group | null = null;
   private carried: THREE.Group | null = null;
   private anchor: WristAnchor | null = null;
+  private positionAnchor: WristAnchor | null = null;
   private lastTrackedAt = -Infinity;
   private hands: NormalizedHand[] = [];
   private state: RakhiTyingState = 'IDLE';
@@ -215,6 +216,7 @@ export class Rakhi3DRenderer {
     parent.visible = true;
     this.three.scene.updateMatrixWorld(true);
     const camera = this.three.camera;
+    this.alignTrackerPosition(parent, camera);
     const project = (point: THREE.Vector3) => this.attached!.localToWorld(point).project(camera);
     const center = project(new THREE.Vector3());
     const left = project(new THREE.Vector3(-4.22, 0, 0));
@@ -248,6 +250,26 @@ export class Rakhi3DRenderer {
 
   getAnchor() {
     return this.anchor;
+  }
+
+  setPositionAnchor(anchor: WristAnchor | null) {
+    this.positionAnchor = anchor;
+    const parent = this.three?.trackersParent[0];
+    if (parent?.visible && this.three) this.alignTrackerPosition(parent, this.three.camera);
+  }
+
+  private alignTrackerPosition(parent: THREE.Object3D, camera: THREE.PerspectiveCamera) {
+    if (!this.positionAnchor || this.positionAnchor.confidence < .42 || !this.attached || !this.three) return;
+    this.three.scene.updateMatrixWorld(true);
+    const currentWorld = this.attached.localToWorld(new THREE.Vector3());
+    const currentNdc = currentWorld.clone().project(camera);
+    const targetWorld = new THREE.Vector3(
+      this.positionAnchor.x * 2 - 1,
+      1 - this.positionAnchor.y * 2,
+      currentNdc.z,
+    ).unproject(camera);
+    parent.position.add(targetWorld.sub(currentWorld));
+    this.three.scene.updateMatrixWorld(true);
   }
 
   private updateVisibility() {
@@ -292,6 +314,7 @@ export class Rakhi3DRenderer {
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     this.anchor = null;
+    this.positionAnchor = null;
     if (this.helper && this.startPromise) void this.helper.destroy();
   }
 }

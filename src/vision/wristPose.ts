@@ -1,4 +1,4 @@
-import type { Vec3 } from '../types/vision';
+import type { Vec3, WristAnchor } from '../types/vision';
 
 const WRIST = 0;
 const INDEX_MCP = 5;
@@ -29,6 +29,18 @@ export interface RightWristPose {
   axis: Vec3;
   /** Normal pointing out through the back/knuckle side of a right hand. */
   dorsal: Vec3;
+}
+
+/** Landmark position/size plus the dedicated VTO solver's screen rotation. */
+export function fuseWristAnchors(position: WristAnchor | null, rotation: WristAnchor | null): WristAnchor | null {
+  if (!position) return rotation;
+  if (!rotation) return position;
+  return {
+    ...position,
+    angle: rotation.angle,
+    forearmDirection: rotation.forearmDirection,
+    confidence: Math.max(position.confidence, rotation.confidence),
+  };
 }
 
 /**
