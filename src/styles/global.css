@@ -35,7 +35,7 @@ h2 { margin: 8px 0 12px; font-size: clamp(28px, 4vw, 42px); }
 .app-footer { flex: none; padding: 8px 4px 0; color: var(--muted); text-align: center; font-size: 11px; }
 
 .ceremony-lobby { min-height: calc(100vh - 145px); display: grid; place-items: center; padding: 24px 0; }
-.lobby-copy, .ended-card { width: min(720px, 100%); padding: clamp(24px, 5vw, 44px); background: var(--paper); border: 1px solid var(--line); border-radius: 24px; box-shadow: 0 22px 70px rgba(75,37,29,.09); }
+.lobby-copy, .ended-card { width: min(720px, 100%); padding: clamp(24px, 5vw, 44px); background: var(--paper); border: 1px solid var(--line); border-radius: 24px; box-shadow: 0 22px 70px rgba(75,37,29,.09); animation: surface-enter .32s ease-out both; }
 .lobby-copy > p { max-width: 620px; }
 .start-ceremony { width: 100%; min-height: 52px; margin-top: 10px; font-size: 17px; }
 .join-divider { display: flex; align-items: center; gap: 12px; margin: 22px 0 13px; color: var(--muted); font-size: 10px; letter-spacing: .1em; }
@@ -43,7 +43,7 @@ h2 { margin: 8px 0 12px; font-size: clamp(28px, 4vw, 42px); }
 .join-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
 .join-row input { width: 100%; min-height: 50px; border: 1px solid var(--line); border-radius: 12px; background: #fff; color: var(--ink); padding: 0 16px; text-transform: uppercase; letter-spacing: .13em; font-weight: 500; }
 .lobby-copy small { display: block; margin-top: 17px; color: var(--muted); line-height: 1.5; }
-.error-banner, .warning-banner { margin: 12px 0; padding: 11px 13px; border-radius: 11px; line-height: 1.5; font-size: 13px; }
+.error-banner, .warning-banner { margin: 12px 0; padding: 11px 13px; border-radius: 11px; line-height: 1.5; font-size: 13px; animation: surface-enter .28s ease-out both; }
 .error-banner { color: #7c211e; background: #f9ded8; border: 1px solid #e9aaa1; }
 .warning-banner { color: #70431d; background: #faecd4; border: 1px solid #e8c68f; }
 .waiting-room { text-align: center; }
@@ -52,8 +52,8 @@ h2 { margin: 8px 0 12px; font-size: clamp(28px, 4vw, 42px); }
 .connection-pulse { display: flex; justify-content: center; align-items: center; gap: 9px; margin: 16px 0; color: var(--muted); font-size: 12px; }
 .connection-pulse i { width: 9px; height: 9px; border-radius: 50%; background: var(--red); animation: pulse 1.5s infinite; }
 @keyframes pulse { 70% { box-shadow: 0 0 0 12px rgba(166,49,42,0); } 0% { box-shadow: 0 0 0 0 rgba(166,49,42,.32); } }
-.role-modal { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 20px; background: rgba(75,37,29,.38); }
-.role-dialog { position: relative; width: min(570px, 100%); padding: 30px; background: var(--paper); border: 1px solid var(--line); border-radius: 22px; box-shadow: 0 28px 90px rgba(75,37,29,.2); }
+.role-modal { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 20px; background: rgba(75,37,29,.38); animation: fade-in .22s ease-out both; }
+.role-dialog { position: relative; width: min(570px, 100%); padding: 30px; background: var(--paper); border: 1px solid var(--line); border-radius: 22px; box-shadow: 0 28px 90px rgba(75,37,29,.2); animation: dialog-enter .3s cubic-bezier(.2,.8,.2,1) both; }
 .role-dialog h2 { font-size: 32px; }
 .modal-close { position: absolute; right: 13px; top: 12px; width: 42px; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 28px; }
 .role-options { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 20px; }
@@ -63,7 +63,7 @@ h2 { margin: 8px 0 12px; font-size: clamp(28px, 4vw, 42px); }
 .role-options span { font-size: 12px; font-weight: 300; }
 .ended-card { margin: 90px auto; text-align: center; }
 
-.ceremony-session { display: flex; flex: 1; flex-direction: column; min-height: 0; padding-top: 10px; }
+.ceremony-session { display: flex; flex: 1; flex-direction: column; min-height: 0; padding-top: 10px; animation: fade-in .28s ease-out both; }
 .tracking-video { position: fixed; width: 2px; height: 2px; left: -20px; top: -20px; opacity: .01; pointer-events: none; }
 .session-bar { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 9px; }
 .session-bar > div:first-child { min-width: 0; }
@@ -85,30 +85,35 @@ h2 { margin: 8px 0 12px; font-size: clamp(28px, 4vw, 42px); }
 .ceremony-timer strong { font-size: 19px; font-weight: 400; font-variant-numeric: tabular-nums; }
 .ceremony-grid { display: grid; flex: 1; grid-template-columns: minmax(0, 1fr) 300px; gap: 14px; min-height: 0; align-items: stretch; }
 .ceremony-stage-card, .ceremony-guide, .ceremony-rules, .wrist-pose-guide { background: var(--paper); border: 1px solid var(--line); border-radius: 18px; }
+.ceremony-guide, .wrist-pose-guide, .ceremony-rules { animation: surface-enter .3s ease-out both; }
 .ceremony-stage-card { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .stage-heading { display: flex; flex: none; justify-content: flex-end; gap: 12px; padding: 8px 14px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; }
 .stage-heading > div { color: var(--ink); font-weight: 500; }
 .video-stage { position: relative; flex: 1; min-height: 0; overflow: hidden; background: #241713; }
 .video-stage > video, .overlay-canvas, .rakhi-3d-canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.video-stage > video { transform: scaleX(-1); }
+.video-stage > video { z-index: 1; transform: scaleX(-1); transition: width .34s ease, height .34s ease, inset .34s ease, border-radius .34s ease, opacity .24s ease; }
 .video-stage.remote-main > video { transform: none; }
-.overlay-canvas, .rakhi-3d-canvas { z-index: 2; pointer-events: none; }
+.overlay-canvas, .rakhi-3d-canvas { z-index: 2; opacity: 1; pointer-events: none; transition: width .34s ease, height .34s ease, inset .34s ease, border-radius .34s ease, opacity .24s ease; }
 .rakhi-3d-canvas { z-index: 3; }
 .rakhi-3d-canvas.mirrored-rakhi { transform: scaleX(-1); }
-.overlay-hidden { visibility: hidden; }
-.video-controls { position: absolute; z-index: 8; left: 50%; bottom: 15px; display: flex; gap: 9px; padding: 6px; border: 1px solid rgba(255,255,255,.18); border-radius: 99px; background: rgba(31,18,15,.34); transform: translateX(-50%); backdrop-filter: blur(8px); }
-.self-pip { position: absolute; z-index: 5; right: 14px; bottom: 14px; width: min(24%, 200px); overflow: hidden; aspect-ratio: 16/9; border: 2px solid #fff; border-radius: 12px; background: #211; box-shadow: 0 12px 32px rgba(0,0,0,.25); }
+.overlay-hidden { visibility: hidden; opacity: 0; transition: opacity .24s ease, visibility 0s linear .24s; }
+.video-controls { position: absolute; z-index: 8; left: 50%; bottom: 15px; display: flex; gap: 9px; padding: 6px; border: 1px solid rgba(255,255,255,.18); border-radius: 99px; background: rgba(31,18,15,.34); transform: translateX(-50%); backdrop-filter: blur(8px); transition: left .34s ease; }
+.self-pip { position: absolute; z-index: 5; right: 14px; bottom: 14px; width: min(24%, 200px); overflow: hidden; aspect-ratio: 16/9; border: 2px solid #fff; border-radius: 12px; background: #211; box-shadow: 0 12px 32px rgba(0,0,0,.25); transition: width .34s ease, height .34s ease, inset .34s ease, border-radius .34s ease, opacity .24s ease; }
 .self-pip video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
-.self-pip.remote-pip video { transform: none; }
 .pip-hand-canvas { position: absolute; z-index: 1; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
 .self-pip span { position: absolute; z-index: 2; left: 6px; bottom: 5px; padding: 2px 5px; border-radius: 4px; color: #fff; background: rgba(0,0,0,.55); font-size: 8px; }
-.camera-placeholder { position: absolute; inset: 0; display: grid; place-content: center; gap: 5px; text-align: center; color: #fff; }
+.local-focus > video { z-index: 5; inset: auto 14px 14px auto; width: min(24%, 200px); height: auto; aspect-ratio: 16/9; border: 2px solid #fff; border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,.25); }
+.local-focus .self-pip { z-index: 1; inset: 0; width: 100%; height: 100%; aspect-ratio: auto; border: 0; border-radius: 0; box-shadow: none; }
+.local-focus .self-pip span { display: none; }
+.local-focus > video, .local-focus .self-pip { animation: local-view-crossfade .36s ease-out both; }
+.remote-focus > video, .remote-focus .self-pip { animation: remote-view-crossfade .36s ease-out both; }
+.camera-placeholder { position: absolute; inset: 0; display: grid; place-content: center; gap: 5px; text-align: center; color: #fff; animation: fade-in .25s ease-out both; }
 .camera-placeholder span { font-size: 12px; opacity: .72; }
 .ceremony-controls { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; padding: 12px; border-top: 1px solid var(--line); }
 .ceremony-controls button { min-height: 46px; }
 .ceremony-controls .blessing-button { background: var(--ink); border-color: var(--ink); }
 .ceremony-side { display: grid; grid-auto-rows: min-content; align-content: start; gap: 10px; min-height: 0; overflow: hidden; }
-.call-notice { padding: 12px 14px; border: 1px solid #d8bda9; border-radius: 14px; background: var(--soft); color: var(--ink); font-size: 13px; font-weight: 400; line-height: 1.45; }
+.call-notice { padding: 12px 14px; border: 1px solid #d8bda9; border-radius: 14px; background: var(--soft); color: var(--ink); font-size: 13px; font-weight: 400; line-height: 1.45; animation: surface-enter .28s ease-out both; }
 .ceremony-guide, .wrist-pose-guide { padding: 17px; }
 .ceremony-guide { min-height: 136px; }
 .ceremony-guide strong { display: block; margin: 9px 0 5px; font-size: 17px; font-weight: 500; line-height: 1.4; }
@@ -133,12 +138,22 @@ h2 { margin: 8px 0 12px; font-size: clamp(28px, 4vw, 42px); }
 .guide-hand { display: none; }
 .blessing-layer { position: absolute; inset: 0; z-index: 7; overflow: hidden; pointer-events: none; }
 .blessing-layer.split-blessing { right: auto; width: 50%; }
+.blessing-layer.split-right { left: 50%; }
+.blessing-layer.split-left { left: 0; }
 .blessing-layer img { position: absolute; top: -70px; left: var(--x); width: var(--size); height: var(--size); object-fit: contain; animation: flower-fall var(--duration) linear var(--delay) both; }
 @keyframes flower-fall { 0% { transform: translate3d(0,-40px,0) rotate(0); opacity: 0; } 8% { opacity: 1; } 100% { transform: translate3d(var(--sway),760px,0) rotate(var(--rotation)); opacity: .92; } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes surface-enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes dialog-enter { from { opacity: 0; transform: translateY(12px) scale(.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes local-view-crossfade { from { opacity: .38; } to { opacity: 1; } }
+@keyframes remote-view-crossfade { from { opacity: .38; } to { opacity: 1; } }
 .debug-panel { display: none; }
 
 .split-view .video-stage > video, .split-view .overlay-canvas, .split-view .rakhi-3d-canvas { right: auto; width: 50%; }
+.split-view .split-overlay-right { z-index: 6; left: 50%; }
+.split-view .rakhi-3d-canvas.split-overlay-right { z-index: 7; }
 .split-view .self-pip { inset: 0 0 0 auto; width: 50%; height: 100%; aspect-ratio: auto; border: 0; border-radius: 0; box-shadow: none; }
+.split-view .video-controls { left: 75%; }
 
 @media (max-width: 980px) {
   .app-shell { padding-inline: 14px; }

@@ -176,14 +176,11 @@ export default function NetworkCeremonyApp() {
       wristTrackingVideoRef.current,
       role === 'RECEIVER' ? localStreamRef.current : remoteStreamRef.current,
     );
-    if (!localIsMain) {
-      void attachVideo(mainVideoRef.current, remoteStreamRef.current);
-      void attachVideo(pipVideoRef.current, localStreamRef.current);
-    } else {
-      void attachVideo(mainVideoRef.current, localStreamRef.current);
-      void attachVideo(pipVideoRef.current, remoteStreamRef.current);
-    }
-  }, [sessionState, remoteReady, localIsMain, role]);
+    // Streams never swap elements: remote is always left/main and local is
+    // always right/PiP. CSS changes their geometry, preventing srcObject flicker.
+    void attachVideo(mainVideoRef.current, remoteStreamRef.current);
+    void attachVideo(pipVideoRef.current, localStreamRef.current);
+  }, [sessionState, remoteReady, role]);
 
   const releaseAll = () => {
     if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
@@ -436,7 +433,7 @@ export default function NetworkCeremonyApp() {
       const mainVideo = mainVideoRef.current;
       const canvas = canvasRef.current;
       if (!trackingVideo || !wristTrackingVideo || !mainVideo || !canvas) { rafRef.current = requestAnimationFrame(loop); return; }
-      fitCanvasToVideo(canvas, mainVideo);
+      fitCanvasToVideo(canvas, roleRef.current === 'RECEIVER' ? trackingVideo : mainVideo);
       const now = performance.now();
       const local = await managerRef.current.process(trackingVideo, now);
       const giverHands = roleRef.current === 'GIVER' ? mirrorHandsForCanvas(local.hands) : [];
@@ -479,7 +476,7 @@ export default function NetworkCeremonyApp() {
         fitCanvasToVideo(pipCanvas, pipVideo);
         const pipContext = pipCanvas.getContext('2d');
         pipContext?.clearRect(0, 0, pipCanvas.width, pipCanvas.height);
-        if (pipContext && roleRef.current === 'GIVER' && giverHandsActive && !localIsMain) {
+        if (pipContext && roleRef.current === 'GIVER' && giverHandsActive) {
           local.hands.forEach((hand) => drawHandShadow(pipContext, hand.landmarks, { mirror: true, alpha: .58 * handAlpha }));
         }
       }
@@ -625,7 +622,7 @@ export default function NetworkCeremonyApp() {
     };
     void loop();
     return () => { cancelled = true; if (rafRef.current !== null) cancelAnimationFrame(rafRef.current); rafRef.current = null; };
-  }, [sessionState, faceActivated, giverHandsActive, localIsMain]);
+  }, [sessionState, faceActivated, giverHandsActive]);
 
   useEffect(() => {
     if (sessionState !== 'ACTIVE') return;
@@ -738,7 +735,7 @@ export default function NetworkCeremonyApp() {
         ? 'Waiting for his right wrist'
         : !wristTrackerReady ? 'Preparing wrist tracking…' : 'Show your right wrist'
     : '';
-  const mainShowsReceiver = (localIsMain ? role : oppositeRole(role)) === 'RECEIVER';
+  const receiverOverlayVisible = role === 'RECEIVER' && (splitView || localIsMain);
 
   return (
     <section className="ceremony-session">
@@ -754,14 +751,14 @@ export default function NetworkCeremonyApp() {
       {error && <div className="error-banner">{error}</div>}
       <div className={`ceremony-grid ${splitView ? 'split-view' : ''}`}>
           <div className={`ceremony-stage-card ${activeRitual === 'RAKHI' ? 'rakhi-priority' : ''}`}>
-          <div className="stage-heading"><span>{localIsMain ? 'YOUR CAMERA · MIRRORED' : 'YOUR SIBLING · LIVE'}</span></div>
-          <div className={`video-stage ceremony-video-stage ${localIsMain ? '' : 'remote-main'}`}>
-            <video ref={mainVideoRef} playsInline muted={localIsMain} />
-            <canvas ref={canvasRef} className={`overlay-canvas ${role === 'RECEIVER' && mainShowsReceiver ? '' : 'overlay-hidden'}`} />
-            <canvas ref={rakhi3dCanvasRef} className={`rakhi-3d-canvas ${role === 'RECEIVER' && mainShowsReceiver ? '' : 'overlay-hidden'}`} aria-hidden="true" />
-            <BlessingBurst burstId={blessingBurst} split={splitView} />
+          <div className="stage-heading"><span>{splitView ? 'YOUR SIBLING · LEFT  |  YOU · RIGHT' : localIsMain ? 'YOUR CAMERA · MIRRORED' : 'YOUR SIBLING · LIVE'}</span></div>
+          <div className={`video-stage ceremony-video-stage remote-main ${!splitView ? localIsMain ? 'local-focus' : 'remote-focus' : ''}`}>
+            <video ref={mainVideoRef} playsInline />
+            <canvas ref={canvasRef} className={`overlay-canvas ${splitView ? 'split-overlay-right' : ''} ${receiverOverlayVisible ? '' : 'overlay-hidden'}`} />
+            <canvas ref={rakhi3dCanvasRef} className={`rakhi-3d-canvas ${splitView ? 'split-overlay-right' : ''} ${receiverOverlayVisible ? '' : 'overlay-hidden'}`} aria-hidden="true" />
+            <BlessingBurst burstId={blessingBurst} split={splitView} splitSide={role === blessingTarget ? 'right' : 'left'} />
             {!remoteReady && role === 'GIVER' && <div className="camera-placeholder"><strong>Waiting for receiver video…</strong><span>The data channel may connect a moment before media.</span></div>}
-            <div className={`self-pip ${localIsMain ? 'remote-pip' : ''}`}><video ref={pipVideoRef} playsInline muted={!localIsMain} /><canvas ref={pipCanvasRef} className="pip-hand-canvas" aria-hidden="true" /><span>{localIsMain ? 'YOUR SIBLING' : 'YOU'}</span></div>
+            <div className="self-pip"><video ref={pipVideoRef} playsInline muted /><canvas ref={pipCanvasRef} className="pip-hand-canvas" aria-hidden="true" /><span>YOU</span></div>
             <div className="video-controls" aria-label="Call controls">
               <button className={`icon-button ${audioEnabled ? '' : 'off'}`} aria-label={audioEnabled ? 'Mute microphone' : 'Unmute microphone'} title={audioEnabled ? 'Mute microphone' : 'Unmute microphone'} aria-pressed={!audioEnabled} onClick={() => toggleMedia('audio')}>{audioEnabled ? <Microphone01 size={21} aria-hidden="true" /> : <MicrophoneOff01 size={21} aria-hidden="true" />}</button>
               <button className={`icon-button ${videoEnabled ? '' : 'off'}`} aria-label={videoEnabled ? 'Turn camera off' : 'Turn camera on'} title={videoEnabled ? 'Turn camera off' : 'Turn camera on'} aria-pressed={!videoEnabled} onClick={() => toggleMedia('video')}>{videoEnabled ? <Camera01 size={21} aria-hidden="true" /> : <CameraOff size={21} aria-hidden="true" />}</button>
@@ -771,9 +768,9 @@ export default function NetworkCeremonyApp() {
           <CeremonyControls role={role} activeRitual={activeRitual} tilakApplied={tilakApplied} rakhiAttached={rakhiAttached} aartiComplete={aartiComplete} disabled={connectionState !== 'CONNECTED'} onAarti={startAarti} onTilak={startTilak} onRakhi={startRakhi} onBlessing={giveBlessing} />
         </div>
         <aside className="ceremony-side">
-          <div className="call-notice" role="status">{notice}</div>
+          <div className="call-notice" role="status" key={notice}>{notice}</div>
           {activeRitual === 'RAKHI' && role === 'RECEIVER' && <WristPoseGuide />}
-          <CeremonyGuide activeRitual={activeRitual} rakhiState={rakhiState} instruction={activeRitual === 'AARTI' ? 'Aarti is moving in three gentle clockwise circles.' : activeRitual === 'TILAK' ? tilakFlow === 'WAIT_FACE' ? 'Look toward the camera and hold still for a moment.' : 'The Tilak is being applied.' : rakhiInstruction} progress={rakhiProgress} status={guideStatus} nextStep={!aartiComplete ? role === 'GIVER' ? 'Begin with Aarti.' : 'Your sister will begin with Aarti.' : !tilakApplied ? role === 'GIVER' ? 'Apply the Tilak.' : 'Look toward the camera for the Tilak.' : !rakhiAttached ? role === 'GIVER' ? 'Choose Rakhi and bring both hands into view.' : 'Raise your right fist with the knuckle side toward the camera.' : 'If you are the elder sibling, offer a blessing.'} />
+          <CeremonyGuide key={`${activeRitual}-${rakhiState}-${tilakFlow}`} activeRitual={activeRitual} rakhiState={rakhiState} instruction={activeRitual === 'AARTI' ? 'Aarti is moving in three gentle clockwise circles.' : activeRitual === 'TILAK' ? tilakFlow === 'WAIT_FACE' ? 'Look toward the camera and hold still for a moment.' : 'The Tilak is being applied.' : rakhiInstruction} progress={rakhiProgress} status={guideStatus} nextStep={!aartiComplete ? role === 'GIVER' ? 'Begin with Aarti.' : 'Your sister will begin with Aarti.' : !tilakApplied ? role === 'GIVER' ? 'Apply the Tilak.' : 'Look toward the camera for the Tilak.' : !rakhiAttached ? role === 'GIVER' ? 'Choose Rakhi and bring both hands into view.' : 'Raise your right fist with the knuckle side toward the camera.' : 'If you are the elder sibling, offer a blessing.'} />
           <div className="ceremony-rules"><div className="guide-kicker">CALL NOTES</div><ul><li>The Rakhi attaches only to the brother’s right wrist.</li><li>Keep the wrist visible after tying so the Rakhi can follow it.</li><li>The call ends after 20 minutes. No camera frames are stored.</li></ul></div>
         </aside>
       </div>

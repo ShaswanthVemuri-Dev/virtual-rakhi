@@ -50,8 +50,13 @@ const loadRuntime = () => runtimePromise ??= (async () => {
 })();
 
 export const fitHybridWristScale = (vtoWidth: number, targetWidth: number, previous: number, ready: boolean) => {
-  const measured = THREE.MathUtils.clamp(targetWidth / vtoWidth, .65, 1.55);
-  return ready ? THREE.MathUtils.lerp(previous, measured, .24) : measured;
+  if (![vtoWidth, targetWidth, previous].every(Number.isFinite) || vtoWidth <= 0 || targetWidth <= 0) return previous;
+  const measured = THREE.MathUtils.clamp(targetWidth / vtoWidth, .02, 12);
+  if (!ready) return measured;
+  const change = measured / Math.max(previous, .001);
+  // A large ratio is a VTO depth/scale reacquisition, not normal wrist motion.
+  // Snap it to the Google screen width so an oversized torus never crosses the frame.
+  return change < .6 || change > 1.67 ? measured : THREE.MathUtils.lerp(previous, measured, .4);
 };
 
 export const canRetainRightPose = (hasPose: boolean, positionConfidence: number, missingForMs: number) =>
@@ -299,7 +304,11 @@ export class Rakhi3DRenderer {
     // VTO remains authoritative for the wrist plane, depth and rotation.
     // MediaPipe contributes retained anatomical position and a bounded size
     // correction; both the bracelet and its occluder receive the same scale.
-    const targetWidth = this.positionAnchor.wristWidth ?? this.positionAnchor.scale * .42;
+    const targetWidth = THREE.MathUtils.clamp(
+      this.positionAnchor.wristWidth ?? this.positionAnchor.scale * .42,
+      .035,
+      .14,
+    );
     if (targetWidth > .005) {
       this.attached.scale.setScalar(1);
       this.occluder?.scale.setScalar(1);
