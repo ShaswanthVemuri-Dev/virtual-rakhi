@@ -71,14 +71,19 @@ export class PeerSession {
     if (this.data?.open) this.data.send(message);
   }
 
-  replaceStream(stream: MediaStream) {
+  async replaceStream(stream: MediaStream) {
     const connection = this.call?.peerConnection;
-    if (!connection) return;
+    if (!connection) return false;
     const tracks = stream.getTracks();
-    connection.getSenders().forEach((sender) => {
+    let videoReplaced = false;
+    await Promise.all(connection.getSenders().map(async (sender) => {
       const replacement = tracks.find((track) => track.kind === sender.track?.kind);
-      if (replacement) void sender.replaceTrack(replacement);
-    });
+      if (replacement) {
+        await sender.replaceTrack(replacement);
+        if (replacement.kind === 'video') videoReplaced = true;
+      }
+    }));
+    return videoReplaced;
   }
 
   destroy() {

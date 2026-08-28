@@ -47,6 +47,12 @@ export const normalizeHands = (hands: TrackedHand[]): NormalizedHand[] => {
   });
 };
 
+/** Matches the mirrored self-preview the giver uses to guide her hands. */
+export const mirrorHandsForCanvas = (hands: TrackedHand[]) => normalizeHands(hands.map((hand) => ({
+  ...hand,
+  landmarks: hand.landmarks.map((point) => ({ ...point, x: 1 - point.x })),
+})));
+
 export interface RetargetTarget {
   x: number;
   y: number;
@@ -95,10 +101,21 @@ export const retargetHandsToWrist = (hands: NormalizedHand[], wrist: WristAnchor
   }));
 };
 
+/** Restores the sender's normalized hands to their exact camera-canvas positions. */
+export const restoreHandsToCanvas = (hands: NormalizedHand[]) => hands.map((hand) => {
+  const cos = Math.cos(hand.palmAngle);
+  const sin = Math.sin(hand.palmAngle);
+  return hand.localLandmarks.map((point) => ({
+    x: hand.wrist.x + (point.x * cos - point.y * sin) * hand.palmScale,
+    y: hand.wrist.y + (point.x * sin + point.y * cos) * hand.palmScale,
+    z: point.z * hand.palmScale,
+  }));
+});
+
 /** The on-screen Rakhi position shared by rendering and attachment logic. */
 export const rakhiPlacement = (hands: NormalizedHand[], wrist: WristAnchor) => {
   if (hands.length !== 2) return null;
-  const pinches = retargetHandsToWrist(hands, wrist).map((points) => ({
+  const pinches = restoreHandsToCanvas(hands).map((points) => ({
     x: ((points[4]?.x ?? points[0].x) + (points[8]?.x ?? points[0].x)) / 2,
     y: ((points[4]?.y ?? points[0].y) + (points[8]?.y ?? points[0].y)) / 2,
   }));

@@ -19,6 +19,7 @@ import BlessingBurst from '../components/BlessingBurst';
 import WristPoseGuide from '../components/WristPoseGuide';
 import type { Rakhi3DRenderer } from '../ar/rakhi3dRenderer';
 import { fuseWristAnchors } from '../vision/wristPose';
+import { mirrorHandsForCanvas } from '../rakhi/handRetargeting';
 import { Microphone01 } from '@untitledui/icons/Microphone01';
 import { MicrophoneOff01 } from '@untitledui/icons/MicrophoneOff01';
 import { Camera01 } from '@untitledui/icons/Camera01';
@@ -53,6 +54,8 @@ export default function NetworkCeremonyApp() {
   const trackingVideoRef = useRef<HTMLVideoElement>(null);
   const wristTrackingVideoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const broadcastOverlayCanvasRef = useRef<HTMLCanvasElement>(null);
+  const broadcastCanvasRef = useRef<HTMLCanvasElement>(null);
   const rakhi3dCanvasRef = useRef<HTMLCanvasElement>(null);
   const rakhi3dRef = useRef<Rakhi3DRenderer | null>(null);
   const vtoStartRef = useRef(false);
@@ -60,6 +63,7 @@ export default function NetworkCeremonyApp() {
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const managerRef = useRef(new VisionManager());
   const rendererRef = useRef(new CeremonyRenderer());
+  const broadcastRendererRef = useRef(new CeremonyRenderer());
   const faceRetentionRef = useRef(new FaceRetention());
   const wristRetentionRef = useRef(new WristRetention());
   const machineRef = useRef(new RakhiTyingMachine());
@@ -87,6 +91,11 @@ export default function NetworkCeremonyApp() {
   const lastStateSendRef = useRef(0);
   const lastTimerSyncRef = useRef(-1);
   const blessingTimerRef = useRef<number | null>(null);
+  const handFadeStartRef = useRef<number | null>(null);
+  const compositeStreamRef = useRef<MediaStream | null>(null);
+  const compositeSendingRef = useRef(false);
+  const compositeReplacePendingRef = useRef(false);
+  const lastCompositeAttemptRef = useRef(-Infinity);
   const messageHandlerRef = useRef<(message: CeremonyMessage) => void>(() => undefined);
   const connectionHandlerRef = useRef<(state: ConnectionState) => void>(() => undefined);
 
@@ -139,16 +148,28 @@ export default function NetworkCeremonyApp() {
 
   useEffect(() => {
     const canvas = rakhi3dCanvasRef.current;
-    if (!canvas || sessionState !== 'ACTIVE') return;
+    if (!canvas || sessionState !== 'ACTIVE' || role !== 'RECEIVER') return;
     let renderer: Rakhi3DRenderer | null = null;
     let cancelled = false;
     void import('../ar/rakhi3dRenderer').then(({ Rakhi3DRenderer: Renderer }) => {
       if (cancelled) return;
       renderer = new Renderer(canvas);
       rakhi3dRef.current = renderer;
+      if (tilakAppliedRef.current) void renderer.preload().catch((cause) => console.error(cause));
     });
     return () => { cancelled = true; renderer?.dispose(); rakhi3dRef.current = null; };
-  }, [sessionState]);
+  }, [sessionState, role]);
+
+  useEffect(() => {
+    if (sessionState !== 'ACTIVE' || role !== 'RECEIVER' || !tilakApplied) return;
+    void Promise.all([
+      managerRef.current.preloadWrist(),
+      rakhi3dRef.current?.preload() ?? Promise.resolve(),
+    ]).catch((cause) => {
+      console.error(cause);
+      setError('Wrist tracking could not be prepared. Refresh the call and retry.');
+    });
+  }, [sessionState, role, tilakApplied]);
   useEffect(() => {
     preloadCeremonyAssets().then(() => setAssetsReady(true)).catch(() => setError('Call assets could not be loaded. Re-extract the complete ZIP and retry.'));
   }, []);
@@ -187,6 +208,10 @@ export default function NetworkCeremonyApp() {
     [mainVideoRef.current, pipVideoRef.current, trackingVideoRef.current, wristTrackingVideoRef.current].forEach((video) => { if (video) video.srcObject = null; });
     faceRetentionRef.current.reset();
     wristRetentionRef.current.reset();
+    compositeStreamRef.current?.getVideoTracks().forEach((track) => track.stop());
+    compositeStreamRef.current = null;
+    compositeSendingRef.current = false;
+    compositeReplacePendingRef.current = false;
     connectedRef.current = false;
   };
 
@@ -213,6 +238,7 @@ export default function NetworkCeremonyApp() {
     aartiStartRef.current = null;
     tilakStartRef.current = null;
     faceStableSinceRef.current = null;
+    handFadeStartRef.current = null;
     if (blessingTimerRef.current !== null) window.clearTimeout(blessingTimerRef.current);
     blessingTimerRef.current = null;
     setBlessingTarget(null);
@@ -317,9 +343,6 @@ export default function NetworkCeremonyApp() {
   };
 
   const beginRemoteRakhi = () => {
-    // Face tracking has no part in Rakhi placement. Releasing its GPU delegate
-    // leaves the wrist-specific tracker with the full frame budget.
-    setFaceActivated(false);
     setGiverHandsActive(false);
     setActiveRitual('RAKHI');
     if (roleRef.current === 'GIVER') {
@@ -380,10 +403,13 @@ export default function NetworkCeremonyApp() {
       case 'RAKHI_START': beginRemoteRakhi(); break;
       case 'WRIST_ANCHOR': remoteWristRef.current = message.payload; break;
       case 'GIVER_HANDS': remoteHandsRef.current = message.payload; break;
-      case 'RAKHI_STATE': setRakhiState(message.state); setRakhiInstruction(message.instruction); setRakhiProgress(message.progress); break;
+      case 'RAKHI_STATE':
+        setRakhiState(message.state); setRakhiInstruction(message.instruction); setRakhiProgress(message.progress);
+        if (roleRef.current === 'GIVER') setNotice(message.instruction);
+        break;
       case 'RAKHI_ATTACHED':
-        setRakhiAttached(true); setGiverHandsActive(false); setRakhiState('RAKHI_ATTACHED'); setRakhiProgress(1); setActiveRitual(null);
-        remoteHandsRef.current = [];
+        setRakhiAttached(true); setRakhiState('RAKHI_ATTACHED'); setRakhiProgress(1); setActiveRitual(null);
+        handFadeStartRef.current = performance.now();
         setRakhiInstruction('Rakhi attached.');
         setNotice('Rakhi attached.');
         break;
@@ -401,9 +427,7 @@ export default function NetworkCeremonyApp() {
     let cancelled = false;
     managerRef.current.setFeatures(computedFeatures).then(() => {
       if (cancelled) return;
-      return roleRef.current === 'GIVER'
-        ? managerRef.current.preloadHands()
-        : managerRef.current.preloadWrist();
+      if (roleRef.current === 'GIVER') return managerRef.current.preloadHands();
     }).catch((cause) => {
       console.error(cause);
       if (!cancelled) setError('A local vision model could not load. Refresh and confirm the camera is available.');
@@ -424,10 +448,11 @@ export default function NetworkCeremonyApp() {
       fitCanvasToVideo(canvas, mainVideo);
       const now = performance.now();
       const local = await managerRef.current.process(trackingVideo, now);
+      const giverHands = roleRef.current === 'GIVER' ? mirrorHandsForCanvas(local.hands) : [];
       if (roleRef.current === 'RECEIVER' && local.faceAnchor) retainedTilakFaceRef.current = local.faceAnchor;
 
       const vto = rakhi3dRef.current;
-      if (vto && !vtoStartRef.current && wristTrackingVideo.readyState >= 2) {
+      if (roleRef.current === 'RECEIVER' && activeRitualRef.current === 'RAKHI' && vto && !vtoStartRef.current && wristTrackingVideo.readyState >= 2) {
         vtoStartRef.current = true;
         void vto.start(wristTrackingVideo).then(() => setWristTrackerReady(true)).catch((cause) => {
           console.error(cause);
@@ -436,11 +461,21 @@ export default function NetworkCeremonyApp() {
         });
       }
       const landmarkWrist = roleRef.current === 'RECEIVER' ? local.wristAnchor : remoteWristRef.current;
-      vto?.setPositionAnchor(landmarkWrist);
-      const localWrist = fuseWristAnchors(landmarkWrist, vto?.getAnchor() ?? null);
+      if (roleRef.current === 'RECEIVER') vto?.setPositionAnchor(landmarkWrist);
+      const localWrist = roleRef.current === 'RECEIVER'
+        ? fuseWristAnchors(landmarkWrist, vto?.getAnchor() ?? null)
+        : remoteWristRef.current;
       const wristCandidate = localWrist;
       const wristHeld = wristRetentionRef.current.update(wristCandidate, now);
       const trackedWrist = wristHeld.value;
+      const handAlpha = handFadeStartRef.current === null
+        ? 1
+        : Math.max(0, 1 - (now - handFadeStartRef.current) / 520);
+      if (handFadeStartRef.current !== null && handAlpha <= 0) {
+        handFadeStartRef.current = null;
+        remoteHandsRef.current = [];
+        if (giverHandsActive) setGiverHandsActive(false);
+      }
 
       const pipCanvas = pipCanvasRef.current;
       const pipVideo = pipVideoRef.current;
@@ -449,7 +484,7 @@ export default function NetworkCeremonyApp() {
         const pipContext = pipCanvas.getContext('2d');
         pipContext?.clearRect(0, 0, pipCanvas.width, pipCanvas.height);
         if (pipContext && roleRef.current === 'GIVER' && giverHandsActive && !localIsMain) {
-          local.hands.forEach((hand) => drawHandShadow(pipContext, hand.landmarks, { mirror: true, alpha: .58 }));
+          local.hands.forEach((hand) => drawHandShadow(pipContext, hand.landmarks, { mirror: true, alpha: .58 * handAlpha }));
         }
       }
 
@@ -459,7 +494,7 @@ export default function NetworkCeremonyApp() {
           if (faceActivated) send({ type: 'FACE_ANCHOR', payload: local.faceAnchor });
           if (activeRitualRef.current === 'RAKHI') send({ type: 'WRIST_ANCHOR', payload: localWrist });
         } else if (giverHandsActive) {
-          send({ type: 'GIVER_HANDS', payload: compactHands(local.normalizedHands) });
+          send({ type: 'GIVER_HANDS', payload: compactHands(giverHands) });
         }
       }
 
@@ -489,7 +524,7 @@ export default function NetworkCeremonyApp() {
       }
 
       if (roleRef.current === 'GIVER' && activeRitualRef.current === 'RAKHI') {
-        const update = machineRef.current.update(now, trackedWrist, local.normalizedHands, true);
+        const update = machineRef.current.update(now, trackedWrist, giverHands, true);
         if (update.state === 'WAIT_FOR_GIVER_HANDS' && !giverHandsActive) setGiverHandsActive(true);
         if (update.state === 'WAIT_FOR_RECEIVER_WRIST' && giverHandsActive) setGiverHandsActive(false);
         if (update.state !== rakhiStateRef.current) setRakhiState(update.state);
@@ -501,15 +536,14 @@ export default function NetworkCeremonyApp() {
         }
         if (update.attachedNow) {
           setRakhiAttached(true);
-          setGiverHandsActive(false);
-          remoteHandsRef.current = [];
+          handFadeStartRef.current = now;
           setActiveRitual(null);
           send({ type: 'RAKHI_ATTACHED', timestamp: Date.now() });
         }
       }
 
       const composed: Phase1Frame = roleRef.current === 'GIVER'
-        ? { ...local, faceAnchor: remoteFaceRef.current, wristAnchor: trackedWrist, faceLandmarks: [], poseLandmarks: [] }
+        ? { ...local, faceAnchor: remoteFaceRef.current, wristAnchor: trackedWrist, normalizedHands: giverHands, faceLandmarks: [], poseLandmarks: [] }
         : {
           ...local,
           faceAnchor: local.faceAnchor ?? (tilakAppliedRef.current ? retainedTilakFaceRef.current : null),
@@ -518,16 +552,75 @@ export default function NetworkCeremonyApp() {
           hands: [],
         };
       const faceHeld = faceRetentionRef.current.update(composed.faceAnchor, now);
-      rendererRef.current.draw(canvas, composed, faceHeld, wristHeld, {
+      const aartiProgress = activeRitualRef.current === 'AARTI' && aartiStartRef.current !== null
+        ? Math.min(1, (now - aartiStartRef.current) / AARTI_DURATION_MS)
+        : null;
+      const tilakProgress = activeRitualRef.current === 'TILAK' && tilakStartRef.current !== null
+        ? Math.min(1, (now - tilakStartRef.current) / TILAK_DURATION_MS)
+        : null;
+      const renderOptions = {
         tilakApplied: tilakAppliedRef.current,
         rakhiAttached: rakhiAttachedRef.current,
-        aartiProgress: activeRitualRef.current === 'AARTI' && aartiStartRef.current !== null ? Math.min(1, (now - aartiStartRef.current) / AARTI_DURATION_MS) : null,
-        tilakProgress: activeRitualRef.current === 'TILAK' && tilakStartRef.current !== null ? Math.min(1, (now - tilakStartRef.current) / TILAK_DURATION_MS) : null,
+        aartiProgress,
+        tilakProgress,
         frozenWrist: null,
         rakhiState: rakhiStateRef.current,
-        mirrored: roleRef.current === 'RECEIVER',
-      });
-      rakhi3dRef.current?.draw(composed.normalizedHands, rakhiStateRef.current, roleRef.current === 'RECEIVER');
+        handAlpha: handFadeStartRef.current === null ? undefined : handAlpha,
+      };
+
+      if (roleRef.current === 'RECEIVER') {
+        rendererRef.current.draw(canvas, composed, faceHeld, wristHeld, {
+          ...renderOptions,
+          mirrored: true,
+          handMirrored: true,
+        });
+        rakhi3dRef.current?.draw(composed.normalizedHands, rakhiStateRef.current, true);
+
+        const broadcastOverlay = broadcastOverlayCanvasRef.current;
+        const broadcastCanvas = broadcastCanvasRef.current;
+        const rakhiCanvas = rakhi3dCanvasRef.current;
+        if (broadcastOverlay && broadcastCanvas && rakhiCanvas && trackingVideo.readyState >= 2) {
+          fitCanvasToVideo(broadcastOverlay, trackingVideo);
+          broadcastRendererRef.current.draw(broadcastOverlay, composed, faceHeld, wristHeld, {
+            ...renderOptions,
+            mirrored: false,
+            handMirrored: false,
+          });
+          fitCanvasToVideo(broadcastCanvas, trackingVideo);
+          const output = broadcastCanvas.getContext('2d');
+          if (output) {
+            output.clearRect(0, 0, broadcastCanvas.width, broadcastCanvas.height);
+            output.drawImage(trackingVideo, 0, 0, broadcastCanvas.width, broadcastCanvas.height);
+            output.drawImage(broadcastOverlay, 0, 0, broadcastCanvas.width, broadcastCanvas.height);
+            output.drawImage(rakhiCanvas, 0, 0, broadcastCanvas.width, broadcastCanvas.height);
+          }
+
+          if (!compositeStreamRef.current && typeof broadcastCanvas.captureStream === 'function') {
+            const captured = broadcastCanvas.captureStream(30);
+            const videoTrack = captured.getVideoTracks()[0];
+            if (videoTrack) {
+              compositeStreamRef.current = new MediaStream([
+                videoTrack,
+                ...(localStreamRef.current?.getAudioTracks() ?? []),
+              ]);
+            }
+          }
+          if (compositeStreamRef.current && !compositeSendingRef.current && !compositeReplacePendingRef.current && now - lastCompositeAttemptRef.current >= 500) {
+            lastCompositeAttemptRef.current = now;
+            compositeReplacePendingRef.current = true;
+            void peerRef.current?.replaceStream(compositeStreamRef.current).then((replaced) => {
+              compositeSendingRef.current = replaced;
+            }).catch((cause) => {
+              console.error(cause);
+              setError('The composed ceremony video could not be sent. End and recreate the room.');
+            }).finally(() => {
+              compositeReplacePendingRef.current = false;
+            });
+          }
+        }
+      } else {
+        canvas.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
+      }
       if (now - lastUiRef.current >= 120) {
         lastUiRef.current = now;
         setFrame({ ...composed, stats: { ...composed.stats } });
@@ -643,7 +736,11 @@ export default function NetworkCeremonyApp() {
   }
 
   const guideStatus = activeRitual === 'RAKHI'
-    ? frame.wristAnchor ? 'Right wrist ready' : !wristTrackerReady ? 'Preparing wrist tracking…' : role === 'RECEIVER' ? 'Show your right wrist' : 'Waiting for his right wrist'
+    ? frame.wristAnchor
+      ? 'Right wrist ready'
+      : role === 'GIVER'
+        ? 'Waiting for his right wrist'
+        : !wristTrackerReady ? 'Preparing wrist tracking…' : 'Show your right wrist'
     : '';
   const mainShowsReceiver = (localIsMain ? role : oppositeRole(role)) === 'RECEIVER';
 
@@ -651,6 +748,8 @@ export default function NetworkCeremonyApp() {
     <section className="ceremony-session">
       <video ref={trackingVideoRef} className="tracking-video" playsInline muted />
       <video ref={wristTrackingVideoRef} className="tracking-video" playsInline muted />
+      <canvas ref={broadcastOverlayCanvasRef} className="tracking-video" aria-hidden="true" />
+      <canvas ref={broadcastCanvasRef} className="tracking-video" aria-hidden="true" />
       <div className="session-bar">
         <div><div className="room-code-chip"><span>Meeting code</span><strong>{roomCode}</strong><button className="icon-button compact" aria-label="Copy meeting code" title="Copy meeting code" onClick={() => void navigator.clipboard.writeText(roomCode)}><Copy01 size={17} aria-hidden="true" /></button></div><small className="role-label">{role === 'GIVER' ? 'Sister · tying Rakhi' : 'Brother · receiving Rakhi'}</small></div>
         <div className="session-actions"><Timer remaining={remaining} /><button className="icon-button hang-up" aria-label="End call" title="End call" onClick={endSession}><PhoneCall02 size={21} aria-hidden="true" /></button></div>
@@ -662,8 +761,8 @@ export default function NetworkCeremonyApp() {
           <div className="stage-heading"><span>{localIsMain ? 'YOUR CAMERA · MIRRORED' : 'YOUR SIBLING · LIVE'}</span></div>
           <div className={`video-stage ceremony-video-stage ${localIsMain ? '' : 'remote-main'}`}>
             <video ref={mainVideoRef} playsInline muted={localIsMain} />
-            <canvas ref={canvasRef} className={`overlay-canvas ${mainShowsReceiver ? '' : 'overlay-hidden'}`} />
-            <canvas ref={rakhi3dCanvasRef} className={`rakhi-3d-canvas ${mainShowsReceiver ? '' : 'overlay-hidden'}`} aria-hidden="true" />
+            <canvas ref={canvasRef} className={`overlay-canvas ${role === 'RECEIVER' && mainShowsReceiver ? '' : 'overlay-hidden'}`} />
+            <canvas ref={rakhi3dCanvasRef} className={`rakhi-3d-canvas ${role === 'RECEIVER' && mainShowsReceiver ? '' : 'overlay-hidden'}`} aria-hidden="true" />
             <BlessingBurst burstId={blessingBurst} split={splitView} />
             {!remoteReady && role === 'GIVER' && <div className="camera-placeholder"><strong>Waiting for receiver video…</strong><span>The data channel may connect a moment before media.</span></div>}
             <div className={`self-pip ${localIsMain ? 'remote-pip' : ''}`}><video ref={pipVideoRef} playsInline muted={!localIsMain} /><canvas ref={pipCanvasRef} className="pip-hand-canvas" aria-hidden="true" /><span>{localIsMain ? 'YOUR SIBLING' : 'YOU'}</span></div>

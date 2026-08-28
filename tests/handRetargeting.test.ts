@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeHands, pairGuideDistance, retargetHand } from '../src/rakhi/handRetargeting';
+import { mirrorHandsForCanvas, normalizeHands, pairGuideDistance, restoreHandsToCanvas, retargetHand } from '../src/rakhi/handRetargeting';
 import type { TrackedHand } from '../src/types/vision';
 
 const makeHand = (offsetX: number): TrackedHand => {
@@ -38,6 +38,21 @@ describe('hand normalization / retargeting', () => {
     expect(Math.abs(normalized[1].workspaceOffset.x)).toBeGreaterThan(0);
     expect(Math.sign(normalized[0].workspaceOffset.x)).not.toBe(Math.sign(normalized[1].workspaceOffset.x));
     expect(normalized[0].pairCenter).toEqual(normalized[1].pairCenter);
+  });
+
+  it('restores transmitted hands to their original canvas positions', () => {
+    const source = [makeHand(.35), makeHand(.65)];
+    const restored = restoreHandsToCanvas(normalizeHands(source));
+    expect(restored[0][0].x).toBeCloseTo(source[0].landmarks[0].x, 4);
+    expect(restored[0][9].y).toBeCloseTo(source[0].landmarks[9].y, 4);
+    expect(restored[1][0].x).toBeCloseTo(source[1].landmarks[0].x, 4);
+  });
+
+  it('uses the giver mirrored preview as the shared presentation space', () => {
+    const source = [makeHand(.2)];
+    const restored = restoreHandsToCanvas(mirrorHandsForCanvas(source));
+    expect(restored[0][0].x).toBeCloseTo(.8, 4);
+    expect(restored[0][9].x).toBeCloseTo(1 - source[0].landmarks[9].x, 4);
   });
 
   it('maps pair movement toward the central giver guide', () => {

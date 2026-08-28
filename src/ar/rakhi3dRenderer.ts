@@ -49,6 +49,8 @@ const loadRuntime = () => runtimePromise ??= (async () => {
   }
 })();
 
+let modelPreload: Promise<unknown> | null = null;
+
 /** Watch-grade wrist VTO: dedicated wrist detector + PnP pose + soft occlusion. */
 export class Rakhi3DRenderer {
   private helper: VtoHelper | null = null;
@@ -66,6 +68,16 @@ export class Rakhi3DRenderer {
   private disposed = false;
 
   constructor(private readonly canvas: HTMLCanvasElement) {}
+
+  preload() {
+    return Promise.all([
+      loadRuntime(),
+      modelPreload ??= fetch(publicUrl(`${BASE}/NN_WRIST_27.json`)).then((response) => {
+        if (!response.ok) throw new Error('Could not preload the wrist model.');
+        return response.text();
+      }),
+    ]).then(() => undefined);
+  }
 
   start(video: HTMLVideoElement) {
     if (this.disposed || video.readyState < 2) return Promise.resolve();
@@ -275,7 +287,7 @@ export class Rakhi3DRenderer {
   private updateVisibility() {
     if (!this.attached || !this.carried) return;
     this.attached.visible = !!this.anchor && (this.state === 'FINISHING_ANIMATION' || this.state === 'RAKHI_ATTACHED');
-    this.carried.visible = !!this.anchor && ['POSITIONING', 'APPROACHING_WRIST', 'ALIGNMENT_VALID'].includes(this.state) && this.hands.length === 2;
+    this.carried.visible = !!this.anchor && ['APPROACHING_WRIST', 'ALIGNMENT_VALID'].includes(this.state) && this.hands.length === 2;
   }
 
   private placeCarried() {

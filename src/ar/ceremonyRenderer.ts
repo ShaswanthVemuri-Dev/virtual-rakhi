@@ -1,7 +1,7 @@
 import type { FaceAnchor, NormalizedHand, Phase1Frame, WristAnchor } from '../types/vision';
 import type { Retained } from '../vision/trackingRetention';
 import type { RakhiTyingState } from '../rakhi/tyingStateMachine';
-import { retargetHandsToWrist } from '../rakhi/handRetargeting';
+import { restoreHandsToCanvas } from '../rakhi/handRetargeting';
 import { drawHandShadow } from './handShadowRenderer';
 import { TilakRenderer } from './tilakRenderer';
 import { AartiRenderer } from './aartiRenderer';
@@ -15,6 +15,8 @@ export interface CeremonyRenderOptions {
   frozenWrist: WristAnchor | null;
   rakhiState: RakhiTyingState;
   mirrored?: boolean;
+  handMirrored?: boolean;
+  handAlpha?: number;
 }
 
 const activeHandStates = new Set<RakhiTyingState>([
@@ -40,6 +42,7 @@ export class CeremonyRenderer {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     const mirrored = options.mirrored ?? true;
+    const handMirrored = options.handMirrored ?? mirrored;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     if (options.aartiProgress !== null) this.aarti.draw(ctx, options.aartiProgress);
@@ -53,21 +56,21 @@ export class CeremonyRenderer {
     }
 
     const targetWrist = options.frozenWrist ?? wrist.value;
-    if (activeHandStates.has(options.rakhiState) && targetWrist) {
-      this.drawRetargetedHands(ctx, frame.normalizedHands, targetWrist, options.rakhiState, mirrored);
+    if ((activeHandStates.has(options.rakhiState) || options.handAlpha !== undefined) && targetWrist) {
+      this.drawHands(ctx, frame.normalizedHands, options.rakhiState, handMirrored, options.handAlpha);
     }
 
   }
 
-  private drawRetargetedHands(
+  private drawHands(
     ctx: CanvasRenderingContext2D,
     hands: NormalizedHand[],
-    wrist: WristAnchor,
     state: RakhiTyingState,
     mirrored: boolean,
+    handAlpha?: number,
   ) {
-    const fade = state === 'FINISHING_ANIMATION' ? 0.2 : 0.48;
-    retargetHandsToWrist(hands, wrist).forEach((points) => {
+    const fade = (handAlpha ?? (state === 'FINISHING_ANIMATION' ? .55 : 1)) * .48;
+    restoreHandsToCanvas(hands).forEach((points) => {
       drawHandShadow(ctx, points, { mirror: mirrored, alpha: fade });
     });
   }

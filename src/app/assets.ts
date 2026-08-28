@@ -2,7 +2,6 @@ import { publicUrl } from './baseUrl';
 
 export const REQUIRED_ASSETS = [
   'assets/tilak.png',
-  'assets/tilak_applying_hand.webp',
   'assets/aarti_hands_plate.webp',
   'assets/wrist_pose_guide.png',
   'assets/flower_01.png',

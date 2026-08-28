@@ -24,13 +24,13 @@ export interface TyingUpdate {
 const copy: Record<RakhiTyingState, string> = {
   IDLE: 'Ready to begin Rakhi tying.',
   WAIT_FOR_RECEIVER_WRIST: 'Waiting for your brother to hold his right wrist toward the camera.',
-  WAIT_FOR_GIVER_HANDS: 'His wrist is ready. Show both palms and pinch each thumb and index finger.',
-  POSITIONING: 'Pinch each thumb and index finger to pick up the Rakhi.',
-  APPROACHING_WRIST: 'The Rakhi is in your hands. Move it gently toward his wrist.',
+  WAIT_FOR_GIVER_HANDS: 'His wrist is ready. Bring both hands into view.',
+  POSITIONING: 'Touch the thumb and index finger on both hands. The Rakhi will appear between them.',
+  APPROACHING_WRIST: 'Keep both pinches together and guide the Rakhi toward his wrist. Move your hands apart or together to resize it.',
   ALIGNMENT_VALID: 'Perfect — attaching the Rakhi now.',
   WAIT_FOR_HAND_CONTACT: 'Move the Rakhi toward his wrist.',
   TYING_GESTURE: 'Attaching the Rakhi.',
-  FINISHING_ANIMATION: 'The Rakhi has locked onto his wrist. You can remove your hands.',
+  FINISHING_ANIMATION: 'The Rakhi is tying itself around his wrist. You can gently remove your hands.',
   RAKHI_ATTACHED: 'Rakhi attached.',
 };
 
