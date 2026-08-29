@@ -4,6 +4,8 @@ import type { RakhiTyingState } from '../rakhi/tyingStateMachine';
 export type CeremonyRole = 'GIVER' | 'RECEIVER';
 export type ActiveRitual = 'AARTI' | 'TILAK' | 'RAKHI' | null;
 
+export const oppositeRole = (role: CeremonyRole): CeremonyRole => role === 'GIVER' ? 'RECEIVER' : 'GIVER';
+
 export interface CeremonyVisionState {
   faceActivated: boolean;
   wristActivated: boolean;

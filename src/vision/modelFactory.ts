@@ -8,20 +8,10 @@ const fileset = () => {
   return filesetPromise;
 };
 
-async function withDelegateFallback<T>(creator: (delegate: 'GPU' | 'CPU') => Promise<T>) {
-  try {
-    return await creator('GPU');
-  } catch (gpuError) {
-    console.warn('MediaPipe GPU delegate failed; falling back to CPU.', gpuError);
-    return creator('CPU');
-  }
-}
-
 export const createFaceLandmarker = async () => {
   const vision = await fileset();
-  return withDelegateFallback((delegate) =>
-    FaceLandmarker.createFromOptions(vision, {
-      baseOptions: { modelAssetPath: publicUrl('models/face_landmarker.task'), delegate },
+  return FaceLandmarker.createFromOptions(vision, {
+      baseOptions: { modelAssetPath: publicUrl('models/face_landmarker.task'), delegate: 'GPU' },
       runningMode: 'VIDEO',
       numFaces: 1,
       outputFaceBlendshapes: false,
@@ -29,35 +19,30 @@ export const createFaceLandmarker = async () => {
       minFaceDetectionConfidence: 0.5,
       minFacePresenceConfidence: 0.5,
       minTrackingConfidence: 0.5,
-    }),
-  );
+    });
 };
 
 export const createHandLandmarker = async (numHands = 2) => {
   const vision = await fileset();
-  return withDelegateFallback((delegate) =>
-    HandLandmarker.createFromOptions(vision, {
-      baseOptions: { modelAssetPath: publicUrl('models/hand_landmarker.task'), delegate },
+  return HandLandmarker.createFromOptions(vision, {
+      baseOptions: { modelAssetPath: publicUrl('models/hand_landmarker.task'), delegate: 'GPU' },
       runningMode: 'VIDEO',
       numHands,
       minHandDetectionConfidence: 0.45,
       minHandPresenceConfidence: 0.45,
       minTrackingConfidence: 0.45,
-    }),
-  );
+    });
 };
 
 export const createPoseLandmarker = async () => {
   const vision = await fileset();
-  return withDelegateFallback((delegate) =>
-    PoseLandmarker.createFromOptions(vision, {
-      baseOptions: { modelAssetPath: publicUrl('models/pose_landmarker.task'), delegate },
+  return PoseLandmarker.createFromOptions(vision, {
+      baseOptions: { modelAssetPath: publicUrl('models/pose_landmarker.task'), delegate: 'GPU' },
       runningMode: 'VIDEO',
       numPoses: 1,
       outputSegmentationMasks: false,
       minPoseDetectionConfidence: 0.45,
       minPosePresenceConfidence: 0.45,
       minTrackingConfidence: 0.45,
-    }),
-  );
+    });
 };

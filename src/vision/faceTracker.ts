@@ -1,7 +1,7 @@
 import type { FaceLandmarker } from '@mediapipe/tasks-vision';
-import type { FaceAnchor, Vec3 } from '../types/vision';
+import type { FaceAnchor } from '../types/vision';
 import { clamp, distance } from './math';
-import { OneEuroFilter, LandmarkSmoother, RateMeter } from './smoothing';
+import { OneEuroFilter } from './smoothing';
 import { createFaceLandmarker } from './modelFactory';
 
 export class FaceTracker {
@@ -10,12 +10,10 @@ export class FaceTracker {
   private generation = 0;
   private lastInference = -Infinity;
   private readonly intervalMs = 1000 / 15;
-  private readonly smoother = new LandmarkSmoother();
   private readonly xFilter = new OneEuroFilter(1.4, 0.04);
   private readonly yFilter = new OneEuroFilter(1.4, 0.04);
   private readonly scaleFilter = new OneEuroFilter(1.0, 0.03);
   private readonly rotationFilter = new OneEuroFilter(1.0, 0.025);
-  readonly rate = new RateMeter();
 
   async init() {
     if (this.detector) return;
@@ -29,36 +27,28 @@ export class FaceTracker {
     await this.initPromise;
   }
 
-  async process(video: HTMLVideoElement, now: number): Promise<{ anchor: FaceAnchor | null; landmarks: Vec3[] } | null> {
+  process(video: HTMLVideoElement, now: number): { anchor: FaceAnchor | null } | null {
     if (!this.detector || now - this.lastInference < this.intervalMs || video.readyState < 2) return null;
     this.lastInference = now;
     const result = this.detector.detectForVideo(video, now);
-    this.rate.tick(now);
     const raw = result.faceLandmarks?.[0];
-    if (!raw?.length) return { anchor: null, landmarks: [] };
+    if (!raw?.length) return { anchor: null };
+    const leftEye = raw[33];
+    const rightEye = raw[263];
+    const glabella = raw[168] ?? raw[6];
+    const foreheadTop = raw[10];
+    if (!leftEye || !rightEye || !glabella || !foreheadTop) return { anchor: null };
 
-    const landmarks = this.smoother.smooth(
-      'face',
-      raw.map((point: { x: number; y: number; z: number }) => ({ x: point.x, y: point.y, z: point.z })),
-      now,
-    );
-
-    const leftEye = landmarks[33];
-    const rightEye = landmarks[263];
-    const glabella = landmarks[168] ?? landmarks[6];
-    const foreheadTop = landmarks[10];
-    if (!leftEye || !rightEye || !glabella || !foreheadTop) return { anchor: null, landmarks };
-
-    const eyeDistance = distance(leftEye, rightEye);
+    const aspect = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : 16 / 9;
+    const eyeDistance = distance(leftEye, rightEye, aspect);
     const rawX = glabella.x * 0.72 + foreheadTop.x * 0.28;
     const rawY = glabella.y * 0.64 + foreheadTop.y * 0.36;
-    const rawRotation = Math.atan2(rightEye.y - leftEye.y, rightEye.x - leftEye.x);
+    const rawRotation = Math.atan2(rightEye.y - leftEye.y, (rightEye.x - leftEye.x) * aspect);
     const geometryConfidence = clamp((eyeDistance - 0.045) / 0.12, 0, 1);
     const centeredConfidence = clamp(1 - Math.abs(rawX - 0.5) * 0.9, 0.65, 1);
     const confidence = clamp(0.72 + geometryConfidence * 0.22, 0, 0.98) * centeredConfidence;
 
     return {
-      landmarks,
       anchor: {
         x: this.xFilter.filter(rawX, now),
         y: this.yFilter.filter(rawY, now),
@@ -73,7 +63,5 @@ export class FaceTracker {
     this.generation += 1;
     this.detector?.close();
     this.detector = null;
-    this.smoother.clear();
-    this.rate.reset();
   }
 }

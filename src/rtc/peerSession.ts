@@ -35,11 +35,20 @@ const peerOptions = (): PeerOptions => {
   return options;
 };
 
+export const acceptsParticipant = (acceptedPeer: string | null, incomingPeer: string) =>
+  acceptedPeer === null || acceptedPeer === incomingPeer;
+
 export class PeerSession {
   private peer: Peer | null = null;
   private data: DataConnection | null = null;
   private call: MediaConnection | null = null;
   private destroyed = false;
+  private acceptedPeer: string | null = null;
+  private dataOpen = false;
+  private mediaReady = false;
+  private connected = false;
+  private messageWindowStarted = 0;
+  private messageCount = 0;
 
   constructor(private readonly events: PeerSessionEvents) {}
 
@@ -94,20 +103,39 @@ export class PeerSession {
     this.data = null;
     this.call = null;
     this.peer = null;
+    this.acceptedPeer = null;
+    this.dataOpen = this.mediaReady = this.connected = false;
+    this.messageWindowStarted = this.messageCount = 0;
+  }
+
+  private accepts(peerId: string) {
+    if (!acceptsParticipant(this.acceptedPeer, peerId)) return false;
+    this.acceptedPeer = peerId;
+    return true;
+  }
+
+  private updateConnected() {
+    if (!this.connected && this.dataOpen && this.mediaReady) {
+      this.connected = true;
+      this.events.onState('CONNECTED');
+    }
   }
 
   private bindPeer(peer: Peer, stream: MediaStream, hosting: boolean) {
     peer.on('connection', (connection) => {
-      if (!hosting || this.data) return connection.close();
+      if (!hosting || this.data || !this.accepts(connection.peer)) return connection.close();
       this.bindData(connection);
     });
     peer.on('call', (call) => {
-      if (!hosting || this.call) return call.close();
+      if (!hosting || this.call || !this.accepts(call.peer)) return call.close();
       this.bindCall(call);
       call.answer(stream);
     });
     peer.on('disconnected', () => {
-      if (!this.destroyed) this.events.onState('DISCONNECTED');
+      if (!this.destroyed) {
+        this.events.onState('CONNECTING');
+        try { peer.reconnect(); } catch { this.events.onState('DISCONNECTED'); }
+      }
     });
     peer.on('error', (error) => {
       if (this.destroyed) return;
@@ -123,11 +151,16 @@ export class PeerSession {
 
   private bindData(connection: DataConnection) {
     this.data = connection;
-    connection.on('open', () => this.events.onState('CONNECTED'));
+    connection.on('open', () => { this.dataOpen = true; this.updateConnected(); });
     connection.on('data', (value) => {
-      if (isCeremonyMessage(value)) this.events.onMessage(value);
+      const now = Date.now();
+      if (now - this.messageWindowStarted >= 1_000) { this.messageWindowStarted = now; this.messageCount = 0; }
+      this.messageCount += 1;
+      if (this.messageCount <= 60 && isCeremonyMessage(value)) this.events.onMessage(value);
     });
     connection.on('close', () => {
+      this.dataOpen = false;
+      this.connected = false;
       if (!this.destroyed) this.events.onState('DISCONNECTED');
     });
     connection.on('error', (error) => this.events.onError(`Data channel error: ${error.message}`));
@@ -135,8 +168,10 @@ export class PeerSession {
 
   private bindCall(call: MediaConnection) {
     this.call = call;
-    call.on('stream', (stream) => this.events.onRemoteStream(stream));
+    call.on('stream', (stream) => { this.mediaReady = true; this.events.onRemoteStream(stream); this.updateConnected(); });
     call.on('close', () => {
+      this.mediaReady = false;
+      this.connected = false;
       if (!this.destroyed) this.events.onState('DISCONNECTED');
     });
     call.on('error', (error) => this.events.onError(`Media connection error: ${error.message}`));

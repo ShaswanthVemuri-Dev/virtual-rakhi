@@ -1,23 +1,25 @@
 # Virtual Rakhi
 
-A deployable two-person Raksha Bandhan ceremony built with React, WebRTC, MediaPipe and Three.js. It has one production flow: create or join a meeting, choose the sister/brother role, then complete Aarti, Tilak, Rakhi and Blessing in order.
+A deployable two-person Raksha Bandhan ceremony built with React, WebRTC, MediaPipe and Three.js. It has one required production path: create or join a meeting, then complete Aarti, Tilak, Rakhi and Blessing in order.
 
 ## What is included
 
 - Five-to-eight character meeting codes; no account, scheduling, database or invite-link flow.
 - Peer-to-peer video/audio and synchronized ceremony state.
-- Female/giver and male/receiver interfaces selected before camera access.
+- Only the meeting creator selects Female/giver or Male/receiver. The joiner is assigned the opposite role automatically and is never prompted.
+- The first accepted Peer ID owns both media and controls; a third device is refused.
 - Sequential controls: Aarti → Tilak → Rakhi → Blessing.
 - A 20-minute synchronized call timer.
 - Local-only MediaPipe tracking; frames are not uploaded or stored.
 - Right-hand world landmarks fused with the forearm pose for wrist size, roll and orientation.
 - A single purpose-built procedural 3D Rakhi with wrist-sized thread, flower pendant, roll-aware orientation, and depth-only wrist occlusion.
 - Responsive focus/PIP and split views for desktop and current iPad Safari.
-- Laila throughout, with a light cream/maroon two-tone interface and no gradients.
+- Local system serif typography, with a light cream/maroon two-tone interface and no external font request.
+- No alternate AR, video-only, or simulated-tracking modes: setup fails clearly unless the required camera, microphone, WebRTC, canvas capture, WebGL and WASM path is available.
 
 ## Run locally
 
-Use the current Node.js LTS release:
+Use Node.js 22.12 or newer (or Node.js 20.19+):
 
 ```bash
 npm install
@@ -25,7 +27,7 @@ npm run setup
 npm run dev
 ```
 
-Open `http://127.0.0.1:5173`. Camera access works on localhost or HTTPS, not by opening `index.html` directly. Test a real call on two devices; one physical webcam usually cannot be opened by two browser windows at once.
+Open `http://127.0.0.1:5173`. Camera access works on localhost or HTTPS, not by opening `index.html` directly. `START.bat` uses PeerJS Cloud and keeps Vite in the foreground so Ctrl+C stops it cleanly. A Vercel HTTPS deployment is the simplest phone/iPad test setup.
 
 ## Deploy from GitHub to Vercel
 
@@ -68,22 +70,25 @@ Optional self-hosted PeerServer settings are documented in `.env.example`.
 
 ## iPad support
 
-Current iPad Safari supports the required WebRTC, WebAssembly and WebGL features. Use the Vercel HTTPS URL, allow camera/microphone, and keep the page in the foreground. Older iPads may reduce tracking frame rate or fall back to the procedural band if WebGL resources are unavailable. Landscape gives the best split-screen layout; portrait remains usable.
+Use the Vercel HTTPS URL on a current iPad Safari release, allow camera/microphone, and keep the page in the foreground. The app checks its required browser APIs before requesting devices and stops setup if the single ceremony path is unavailable. Landscape gives the largest camera target; portrait switches to a scrolling single-column layout at iPad width.
 
 ## Focused verification
 
 ```bash
 npm run typecheck
 npm test
+npm run check:runtime
 npm run build
+npm audit
 ```
 
-For a complete manual check, connect two physical devices and verify camera permission, role conflict handling, every ceremony unlock, wrist turn front/back, split view, blessing flowers, and timer cleanup.
+For a complete manual check, connect two physical devices and verify creator-only role selection, automatic opposite-role assignment, third-device rejection, every ceremony unlock, right-versus-left wrist handling, horizontal/vertical wrist scale, split versus focus alignment, camera/microphone toggles, blessing flowers, and timer cleanup. Record both screens from the same run when investigating timing or 3D placement.
 
 ## Privacy and limitations
 
-- The room is temporary and accepts two participants.
+- The room is temporary and accepts exactly the creator plus the first joiner; later peers are rejected.
 - Webcam frames and landmarks are held only in memory during the call.
 - There is intentionally no identity verification; share codes privately.
 - Public PeerJS signaling and public STUN are appropriate for an MVP, not an uptime-guaranteed commercial service.
-- Browser hand tracking estimates pose from a single camera; it is convincing AR, not millimetre-accurate depth scanning.
+- Browser hand tracking estimates pose from a single camera. The Rakhi uses aspect-corrected, conservatively calibrated and locked visual scale, but it is still an AR illusion rather than millimetre-accurate wrist scanning.
+- The repository does not include an invite-link flow; participants share only the displayed room code.

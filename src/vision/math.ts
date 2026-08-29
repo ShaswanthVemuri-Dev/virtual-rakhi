@@ -2,7 +2,8 @@ import type { Vec2 } from '../types/vision';
 
 export const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
-export const distance = (a: Vec2, b: Vec2) => Math.hypot(a.x - b.x, a.y - b.y);
+/** Image-space distance in units of frame height. */
+export const distance = (a: Vec2, b: Vec2, aspect = 1) => Math.hypot((a.x - b.x) * aspect, a.y - b.y);
 
 export const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 

@@ -24,8 +24,6 @@ const activeHandStates = new Set<RakhiTyingState>([
   'POSITIONING',
   'APPROACHING_WRIST',
   'ALIGNMENT_VALID',
-  'WAIT_FOR_HAND_CONTACT',
-  'TYING_GESTURE',
   'FINISHING_ANIMATION',
 ]);
 

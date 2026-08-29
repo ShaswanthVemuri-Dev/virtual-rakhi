@@ -23,8 +23,6 @@ export interface WristAnchor {
   confidence: number;
   forearmDirection: Vec2;
   wristWidth?: number;
-  palmNormal?: Vec3;
-  handDirection?: Vec3;
   dorsalFacing?: number;
 }
 
@@ -47,32 +45,19 @@ export interface NormalizedHand {
   workspaceOffset: Vec2;
   pairCenter: Vec2;
   pairScale: number;
-}
-
-export interface InferenceStats {
-  faceFps: number;
-  wristFps: number;
-  handFps: number;
-  renderFps: number;
+  aspect: number;
 }
 
 export interface Phase1Frame {
   timestamp: number;
   faceAnchor: FaceAnchor | null;
   wristAnchor: WristAnchor | null;
-  faceLandmarks: Vec3[];
-  poseLandmarks: Vec3[];
   hands: TrackedHand[];
   normalizedHands: NormalizedHand[];
-  stats: InferenceStats;
 }
-
-export type LabMode = 'RECEIVER' | 'GIVER';
 
 export interface VisionFeatures {
   face: boolean;
   wrist: boolean;
   hands: boolean;
 }
-
-export type QualityLabel = 'READY' | 'GOOD - HOLD STEADY' | 'ADJUST POSITION' | 'TRACKING LOST';

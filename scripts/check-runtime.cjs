@@ -1,43 +1,42 @@
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const root = path.resolve(__dirname, '..');
+const hashes = require('./runtime-hashes.cjs');
 
-const required = [
-  'public/assets/tilak.png',
-  'public/assets/tilak_hand.png',
-  'public/assets/aarti_thali.png',
-  'public/assets/flower_01.png',
-  'public/assets/flower_02.png',
-  'public/assets/flower_03.png',
-  'public/models/face_landmarker.task',
-  'public/models/hand_landmarker.task',
-  'public/models/pose_landmarker.task',
+const root = path.resolve(__dirname, '..');
+const sourceFiles = [
   'src/app/App.tsx',
   'src/app/NetworkCeremonyApp.tsx',
   'src/vision/visionManager.ts',
   'src/rakhi/handRetargeting.ts',
   'src/rakhi/tyingStateMachine.ts',
   'src/ar/ceremonyRenderer.ts',
+  'src/ar/rakhi3dRenderer.ts',
   'src/rtc/peerSession.ts',
   'src/rtc/messages.ts',
   'src/media/acquireMedia.ts',
 ];
 
+const sha256 = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 let failed = false;
-for (const relative of required) {
-  const full = path.join(root, relative);
-  if (!fs.existsSync(full)) {
-    console.error(`[check] Missing required file: ${relative}`);
+
+for (const relative of sourceFiles) {
+  if (!fs.existsSync(path.join(root, relative))) {
+    console.error(`[check] Missing required source file: ${relative}`);
     failed = true;
   }
 }
 
-const wasmDir = path.join(root, 'public', 'wasm');
-const wasmFiles = fs.existsSync(wasmDir) ? fs.readdirSync(wasmDir).filter((name) => name.endsWith('.wasm') || name.endsWith('.js')) : [];
-if (wasmFiles.length < 2) {
-  console.error('[check] MediaPipe WASM runtime is incomplete in public/wasm.');
-  failed = true;
+for (const [relative, expected] of Object.entries(hashes)) {
+  const full = path.join(root, relative);
+  if (!fs.existsSync(full)) {
+    console.error(`[check] Missing required runtime file: ${relative}`);
+    failed = true;
+  } else if (sha256(full) !== expected) {
+    console.error(`[check] Runtime hash mismatch: ${relative}`);
+    failed = true;
+  }
 }
 
 if (failed) process.exit(1);
-console.log(`[check] Virtual Rakhi runtime integrity check passed (${wasmFiles.length} MediaPipe WASM/JS files found).`);
+console.log(`[check] Runtime integrity passed (${Object.keys(hashes).length} verified assets/models/runtime files).`);

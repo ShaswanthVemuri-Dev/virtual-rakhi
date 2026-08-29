@@ -15,24 +15,14 @@ describe('tracking retention', () => {
     expect(retention.update({ ...anchor, x: 0.55 }, 1000).state).toBe('LIVE');
   });
 
-  it('retains the full 3D wrist orientation without adding live-frame lag', () => {
+  it('retains wrist scale and facing without adding live-frame lag', () => {
     const retention = new WristRetention();
-    const first = { x: .5, y: .5, scale: .2, angle: 0, confidence: .9, forearmDirection: { x: 1, y: 0 }, wristWidth: .08, palmNormal: { x: 0, y: 0, z: -1 }, handDirection: { x: 1, y: 0, z: 0 }, dorsalFacing: .9 };
+    const first = { x: .5, y: .5, scale: .2, angle: 0, confidence: .9, forearmDirection: { x: 1, y: 0 }, wristWidth: .08, dorsalFacing: .9 };
     retention.update(first, 0);
     const next = retention.update({ ...first, x: .52, dorsalFacing: .7 }, 16);
-    expect(next.value?.palmNormal).toBeDefined();
-    expect(next.value?.handDirection).toBeDefined();
     expect(next.value?.wristWidth).toBeGreaterThan(0);
     expect(next.value?.x).toBe(.52);
     expect(next.value?.dorsalFacing).toBe(.7);
-  });
-
-  it('does not interpolate through zero when a pose solver flips its normal', () => {
-    const retention = new WristRetention();
-    const first = { x: .5, y: .5, scale: .2, angle: 0, confidence: .9, forearmDirection: { x: 0, y: -1 }, palmNormal: { x: 0, y: 0, z: -1 }, handDirection: { x: 0, y: -1, z: 0 } };
-    retention.update(first, 0);
-    const next = retention.update({ ...first, palmNormal: { x: 0, y: 0, z: 1 } }, 16);
-    expect(next.value?.palmNormal?.z).toBeLessThan(-.99);
   });
 
   it('keeps the Google wrist position through brief missed inferences', () => {

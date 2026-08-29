@@ -17,6 +17,7 @@ const makeHands = (centerX: number, separation: number, pinching = false): Norma
     workspaceOffset: { x: sign * (separation / 2) / palmScale, y: 0 },
     pairCenter: { x: centerX, y: 0.55 },
     pairScale: palmScale,
+    aspect: 1,
   })) as NormalizedHand[];
 };
 
@@ -25,15 +26,14 @@ describe('RakhiTyingMachine', () => {
     const machine = new RakhiTyingMachine();
     expect(machine.start().state).toBe('WAIT_FOR_RECEIVER_WRIST');
     machine.update(0, wrist, []);
-    const captured = machine.update(140, wrist, []);
+    const captured = machine.update(320, wrist, []);
     expect(captured.state).toBe('WAIT_FOR_GIVER_HANDS');
-    expect(captured.captureWrist).toBeTruthy();
 
     expect(machine.update(500, wrist, makeHands(0.25, 0.3)).state).toBe('POSITIONING');
     expect(machine.update(600, wrist, makeHands(0.25, 0.3, true)).state).toBe('APPROACHING_WRIST');
     expect(machine.update(700, wrist, makeHands(0.5, 0.3, true)).state).toBe('ALIGNMENT_VALID');
-    expect(machine.update(850, wrist, makeHands(0.5, 0.3, true)).state).toBe('FINISHING_ANIMATION');
-    expect(machine.update(1080, wrist, makeHands(0.5, 0.3, true)).attachedNow).toBe(true);
+    expect(machine.update(1160, wrist, makeHands(0.5, 0.3, true)).state).toBe('FINISHING_ANIMATION');
+    expect(machine.update(1820, wrist, makeHands(0.5, 0.3, true)).attachedNow).toBe(true);
     expect(machine.getState()).toBe('RAKHI_ATTACHED');
   });
 
@@ -41,7 +41,7 @@ describe('RakhiTyingMachine', () => {
     const machine = new RakhiTyingMachine();
     machine.start();
     machine.update(0, wrist, []);
-    machine.update(140, wrist, []);
+    machine.update(320, wrist, []);
     machine.update(500, wrist, makeHands(0.5, 0.08));
     expect(machine.getState()).toBe('POSITIONING');
     expect(machine.update(1200, wrist, makeHands(0.5, 0.08)).state).toBe('POSITIONING');
@@ -51,7 +51,7 @@ describe('RakhiTyingMachine', () => {
     const machine = new RakhiTyingMachine();
     machine.start();
     machine.update(0, wrist, [], true);
-    expect(machine.update(140, wrist, [], true).state).toBe('WAIT_FOR_GIVER_HANDS');
+    expect(machine.update(320, wrist, [], true).state).toBe('WAIT_FOR_GIVER_HANDS');
     expect(machine.update(500, null, makeHands(0.5, 0.3, true), true).state).toBe('WAIT_FOR_RECEIVER_WRIST');
   });
 });

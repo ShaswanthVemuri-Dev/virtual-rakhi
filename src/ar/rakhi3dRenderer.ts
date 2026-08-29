@@ -73,26 +73,22 @@ export const projectRingDiameter = (
     minX = Math.min(minX, x); maxX = Math.max(maxX, x);
     minY = Math.min(minY, y); maxY = Math.max(maxY, y);
   }
-  const diameter = Math.max(maxX - minX, maxY - minY);
+  const aspect = camera instanceof THREE.PerspectiveCamera ? camera.aspect : 1;
+  const diameter = Math.max((maxX - minX) * aspect, maxY - minY);
   return Number.isFinite(diameter) && diameter > .002 ? diameter : null;
 };
 
-export const fitHybridWristScale = (
-  projectedDiameter: number,
-  targetWidth: number,
-  previous: number,
-  ready: boolean,
-) => {
-  if (![projectedDiameter, targetWidth, previous].every(Number.isFinite)
-    || projectedDiameter <= .002 || targetWidth <= 0) return previous;
-  const measured = THREE.MathUtils.clamp(targetWidth / projectedDiameter, .08, 3);
-  if (!ready) return measured;
-  const change = measured / Math.max(previous, .001);
-  // A reacquired VTO pose can jump in depth. Correct that immediately; smooth
-  // only ordinary frame-to-frame wrist-size noise.
-  return change < .55 || change > 1.8
-    ? measured
-    : THREE.MathUtils.lerp(previous, measured, .32);
+export const wristScaleSample = (projectedDiameter: number, targetWidth: number, dorsalFacing = 1) => {
+  if (![projectedDiameter, targetWidth, dorsalFacing].every(Number.isFinite)
+    || projectedDiameter < .03 || targetWidth <= 0 || dorsalFacing < .65) return null;
+  const ratio = targetWidth / projectedDiameter;
+  return ratio >= .72 && ratio <= 1.28 ? ratio : null;
+};
+
+export const medianWristScale = (samples: number[]) => {
+  if (samples.length < 5) return null;
+  const sorted = [...samples].sort((a, b) => a - b);
+  return THREE.MathUtils.clamp(sorted[Math.floor(sorted.length / 2)], .8, 1.2);
 };
 
 export const canRetainRightPose = (hasPose: boolean, positionConfidence: number, missingForMs: number) =>
@@ -104,12 +100,19 @@ export const translatePoseMatrix = (matrix: THREE.Matrix4, delta: THREE.Vector3)
   matrix.elements[14] += delta.z;
 };
 
+const disposeObject = (root: THREE.Object3D | null) => root?.traverse((object) => {
+  if (!(object instanceof THREE.Mesh)) return;
+  object.geometry.dispose();
+  const materials = Array.isArray(object.material) ? object.material : [object.material];
+  materials.forEach((material) => material.dispose());
+});
+
 /** Watch-grade wrist VTO: dedicated wrist detector + PnP pose + soft occlusion. */
 export class Rakhi3DRenderer {
   private helper: VtoHelper | null = null;
   private three: VtoThree | null = null;
   private startPromise: Promise<void> | null = null;
-  private resizeObserver: ResizeObserver | null = null;
+  private sourceVideo: HTMLVideoElement | null = null;
   private trackerCanvas = document.createElement('canvas');
   private attached: THREE.Group | null = null;
   private occluder: THREE.Mesh | null = null;
@@ -118,12 +121,15 @@ export class Rakhi3DRenderer {
   private positionAnchor: WristAnchor | null = null;
   private lastRightPose: THREE.Matrix4 | null = null;
   private fittedScale = 1;
-  private scaleReady = false;
+  private scaleSamples: number[] = [];
+  private scaleLocked = false;
   private trackerDepth = .92;
   private lastTrackedAt = -Infinity;
   private hands: NormalizedHand[] = [];
   private state: RakhiTyingState = 'IDLE';
+  private finishStartedAt = -Infinity;
   private disposed = false;
+  private readonly handleVideoResize = () => this.sizeCanvases(true);
 
   constructor(private readonly canvas: HTMLCanvasElement) {}
 
@@ -137,6 +143,7 @@ export class Rakhi3DRenderer {
     if (this.disposed) return;
     const globals = globalThis as VtoGlobals;
     this.helper = globals.HandTrackerThreeHelper;
+    this.sourceVideo = video;
     this.sizeCanvases(false);
     this.three = await this.helper.init({
       handTrackerCanvas: this.trackerCanvas,
@@ -161,8 +168,7 @@ export class Rakhi3DRenderer {
     });
     if (this.disposed) return void this.helper.destroy();
     this.setupScene();
-    this.resizeObserver = new ResizeObserver(() => this.sizeCanvases(true));
-    this.resizeObserver.observe(this.canvas);
+    video.addEventListener('resize', this.handleVideoResize);
   }
 
   private setupScene() {
@@ -240,9 +246,11 @@ export class Rakhi3DRenderer {
     root.position.set(0, -.45, .9);
     const red = new THREE.Mesh(new THREE.TorusGeometry(4.22, .14, 14, 96), material.red);
     const gold = new THREE.Mesh(new THREE.TorusGeometry(4.22, .075, 12, 96), material.saffron);
+    red.userData.rakhiRing = gold.userData.rakhiRing = true;
     red.position.z = -.15;
     gold.position.z = .15;
     const flower = this.buildFlower();
+    flower.userData.rakhiFlower = true;
     flower.position.y = 4.23;
     root.add(red, gold, flower);
     return root;
@@ -305,8 +313,9 @@ export class Rakhi3DRenderer {
     const bottom = project(new THREE.Vector3(0, 0, -2));
     const top = project(new THREE.Vector3(0, 0, 2));
     // Three projects to -1..1 while the rest of the app uses 0..1.
-    const wristWidth = Math.hypot(right.x - left.x, right.y - left.y) / 2;
-    const axis = { x: top.x - bottom.x, y: bottom.y - top.y };
+    const aspect = camera.aspect || 1;
+    const wristWidth = Math.hypot((right.x - left.x) * aspect, right.y - left.y) / 2;
+    const axis = { x: (top.x - bottom.x) * aspect, y: bottom.y - top.y };
     const axisLength = Math.hypot(axis.x, axis.y) || 1;
     const direction = { x: axis.x / axisLength, y: axis.y / axisLength };
     this.anchor = {
@@ -322,10 +331,25 @@ export class Rakhi3DRenderer {
 
   draw(hands: NormalizedHand[], state: RakhiTyingState, mirrored: boolean) {
     this.hands = hands;
+    if (state === 'FINISHING_ANIMATION' && this.state !== state) this.finishStartedAt = performance.now();
     this.state = state;
+    if (state === 'FINISHING_ANIMATION' || state === 'RAKHI_ATTACHED') this.scaleLocked = true;
     this.canvas.classList.toggle('mirrored-rakhi', mirrored);
     this.updateVisibility();
+    if (state === 'FINISHING_ANIMATION') this.setWrapProgress((performance.now() - this.finishStartedAt) / 650);
+    else if (state === 'RAKHI_ATTACHED') this.setWrapProgress(1);
     this.placeCarried();
+  }
+
+  private setWrapProgress(progress: number) {
+    const amount = THREE.MathUtils.smoothstep(progress, 0, 1);
+    this.attached?.traverse((object) => {
+      if (object.userData.rakhiFlower) object.visible = amount >= .72;
+      if (!(object instanceof THREE.Mesh) || !object.userData.rakhiRing) return;
+      const available = object.geometry.index?.count ?? object.geometry.getAttribute('position').count;
+      const count = Math.floor(available * amount / 3) * 3;
+      object.geometry.setDrawRange(0, count);
+    });
   }
 
   getAnchor() {
@@ -346,19 +370,16 @@ export class Rakhi3DRenderer {
       .035,
       .14,
     );
-    if (targetWidth > .005) {
+    if (!this.scaleLocked && targetWidth > .005) {
       this.attached.scale.setScalar(1);
       this.occluder?.scale.setScalar(1);
       this.three.scene.updateMatrixWorld(true);
       const projectedDiameter = projectRingDiameter(this.attached, camera);
-      if (projectedDiameter !== null) {
-        this.fittedScale = fitHybridWristScale(
-          projectedDiameter,
-          targetWidth,
-          this.fittedScale,
-          this.scaleReady,
-        );
-        this.scaleReady = true;
+      const sample = projectedDiameter === null ? null : wristScaleSample(projectedDiameter, targetWidth, this.positionAnchor.dorsalFacing);
+      if (sample !== null) {
+        this.scaleSamples.push(sample);
+        if (this.scaleSamples.length > 9) this.scaleSamples.shift();
+        this.fittedScale = medianWristScale(this.scaleSamples) ?? this.fittedScale;
       }
       this.applyAttachedScale();
     }
@@ -373,7 +394,13 @@ export class Rakhi3DRenderer {
       1 - this.positionAnchor.y * 2,
       this.trackerDepth,
     ).unproject(camera);
-    const delta = targetWorld.sub(currentWorld);
+    const localTarget = targetWorld.clone();
+    const localCurrent = currentWorld.clone();
+    if (parent.parent) {
+      parent.parent.worldToLocal(localTarget);
+      parent.parent.worldToLocal(localCurrent);
+    }
+    const delta = localTarget.sub(localCurrent);
     translatePoseMatrix(parent.matrix, delta);
     parent.matrixWorldNeedsUpdate = true;
     this.three.scene.updateMatrixWorld(true);
@@ -408,7 +435,7 @@ export class Rakhi3DRenderer {
     const screenToWorld = (x: number, y: number) =>
       new THREE.Vector3(x * 2 - 1, 1 - y * 2, carriedDepth).unproject(camera);
     const center = screenToWorld(placement.center.x, placement.center.y);
-    const edge = screenToWorld(placement.center.x + span / 2, placement.center.y);
+    const edge = screenToWorld(placement.center.x + span / (placement.aspect || 1) / 2, placement.center.y);
     this.carried.position.copy(center);
     this.carried.quaternion.copy(camera.quaternion);
     this.carried.rotateZ(-placement.angle);
@@ -416,13 +443,11 @@ export class Rakhi3DRenderer {
   }
 
   private sizeCanvases(notify: boolean) {
-    const clientWidth = Math.max(2, this.canvas.clientWidth);
-    const clientHeight = Math.max(2, this.canvas.clientHeight);
-    // The call camera is requested at 1280x720. Rendering a larger tracking
-    // surface adds GPU work but no wrist detail, especially on high-DPI iPads.
-    const scale = Math.min(window.devicePixelRatio || 1, 1.5, 1280 / clientWidth, 720 / clientHeight);
-    const width = Math.max(2, Math.round(clientWidth * scale));
-    const height = Math.max(2, Math.round(clientHeight * scale));
+    const sourceWidth = Math.max(2, this.sourceVideo?.videoWidth || 1280);
+    const sourceHeight = Math.max(2, this.sourceVideo?.videoHeight || 720);
+    const scale = Math.min(1, 1280 / sourceWidth, 720 / sourceHeight);
+    const width = Math.max(2, Math.round(sourceWidth * scale));
+    const height = Math.max(2, Math.round(sourceHeight * scale));
     if (this.canvas.width === width && this.canvas.height === height) return;
     this.canvas.width = this.trackerCanvas.width = width;
     this.canvas.height = this.trackerCanvas.height = height;
@@ -431,12 +456,22 @@ export class Rakhi3DRenderer {
 
   dispose() {
     this.disposed = true;
-    this.resizeObserver?.disconnect();
-    this.resizeObserver = null;
+    this.sourceVideo?.removeEventListener('resize', this.handleVideoResize);
+    this.sourceVideo = null;
     this.anchor = null;
     this.positionAnchor = null;
     this.lastRightPose = null;
+    this.scaleSamples = [];
+    this.finishStartedAt = -Infinity;
+    disposeObject(this.attached);
+    disposeObject(this.carried);
+    disposeObject(this.occluder);
+    this.attached = null;
+    this.carried = null;
     this.occluder = null;
     if (this.helper && this.startPromise) void this.helper.destroy();
+    this.helper = null;
+    this.three = null;
+    this.startPromise = null;
   }
 }

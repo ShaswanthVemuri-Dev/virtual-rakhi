@@ -64,31 +64,7 @@ export class LandmarkSmoother {
     });
   }
 
-  clearPrefix(prefix: string) {
-    for (const key of this.filters.keys()) {
-      if (key.startsWith(prefix)) this.filters.delete(key);
-    }
-  }
-
   clear() {
     this.filters.clear();
-  }
-}
-
-export class RateMeter {
-  private samples: number[] = [];
-
-  tick(now: number) {
-    this.samples.push(now);
-    const cutoff = now - 1000;
-    while (this.samples.length && this.samples[0] < cutoff) this.samples.shift();
-  }
-
-  get fps() {
-    return this.samples.length;
-  }
-
-  reset() {
-    this.samples = [];
   }
 }

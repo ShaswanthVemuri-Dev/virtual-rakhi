@@ -7,11 +7,11 @@
   "scripts": {
     "prepare": "node scripts/prepare-wasm.cjs",
     "setup": "node scripts/prepare-wasm.cjs && node scripts/download-models.cjs",
-    "signaling": "node scripts/signaling-server.cjs",
     "dev": "vite --host 127.0.0.1 --port 5173",
     "dev:lan": "vite --host 0.0.0.0 --port 5173",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
+    "check:runtime": "node scripts/check-runtime.cjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
@@ -21,16 +21,16 @@
     "peerjs": "1.5.5",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "three": "^0.179.1"
+    "three": "0.179.1"
   },
   "devDependencies": {
+    "@types/node": "24.10.1",
     "@types/react": "18.3.12",
     "@types/react-dom": "18.3.1",
-    "@types/three": "^0.179.0",
-    "@vitejs/plugin-react": "4.3.4",
-    "peer": "1.0.2",
+    "@types/three": "0.179.0",
+    "@vitejs/plugin-react": "5.2.0",
     "typescript": "5.8.3",
-    "vite": "5.4.14",
-    "vitest": "2.1.8"
+    "vite": "8.2.2",
+    "vitest": "4.1.11"
   }
 }

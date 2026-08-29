@@ -1,8 +1,7 @@
 import type { HandLandmarker } from '@mediapipe/tasks-vision';
-import type { NormalizedHand, TrackedHand } from '../types/vision';
-import { LandmarkSmoother, RateMeter } from './smoothing';
+import type { TrackedHand } from '../types/vision';
+import { LandmarkSmoother } from './smoothing';
 import { createHandLandmarker } from './modelFactory';
-import { normalizeHands } from '../rakhi/handRetargeting';
 
 export class HandTracker {
   private detector: HandLandmarker | null = null;
@@ -11,7 +10,6 @@ export class HandTracker {
   private lastInference = -Infinity;
   private readonly intervalMs = 1000 / 27;
   private readonly smoother = new LandmarkSmoother();
-  readonly rate = new RateMeter();
 
   async init() {
     if (this.detector) return;
@@ -25,11 +23,10 @@ export class HandTracker {
     await this.initPromise;
   }
 
-  async process(video: HTMLVideoElement, now: number): Promise<{ hands: TrackedHand[]; normalizedHands: NormalizedHand[] } | null> {
+  process(video: HTMLVideoElement, now: number): { hands: TrackedHand[] } | null {
     if (!this.detector || now - this.lastInference < this.intervalMs || video.readyState < 2) return null;
     this.lastInference = now;
     const result = this.detector.detectForVideo(video, now);
-    this.rate.tick(now);
 
     const hands: TrackedHand[] = (result.landmarks ?? []).map((landmarks: Array<{ x: number; y: number; z: number }>, index: number) => {
       const category = result.handednesses?.[index]?.[0];
@@ -49,7 +46,7 @@ export class HandTracker {
       };
     });
 
-    return { hands, normalizedHands: normalizeHands(hands) };
+    return { hands };
   }
 
   close() {
@@ -57,6 +54,5 @@ export class HandTracker {
     this.detector?.close();
     this.detector = null;
     this.smoother.clear();
-    this.rate.reset();
   }
 }

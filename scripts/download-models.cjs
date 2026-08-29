@@ -1,6 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const crypto = require('crypto');
+const hashes = require('./runtime-hashes.cjs');
 
 const root = path.resolve(__dirname, '..');
 const targetDir = path.join(root, 'public', 'models');
@@ -11,6 +13,8 @@ const models = [
 ];
 
 fs.mkdirSync(targetDir, { recursive: true });
+
+const sha256 = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 
 const download = (url, target, redirects = 0) => new Promise((resolve, reject) => {
   const request = https.get(url, (response) => {
@@ -39,12 +43,17 @@ const download = (url, target, redirects = 0) => new Promise((resolve, reject) =
 (async () => {
   for (const [name, url] of models) {
     const target = path.join(targetDir, name);
-    if (fs.existsSync(target) && fs.statSync(target).size > 100_000) {
-      console.log(`[models] ${name} already present.`);
+    const expected = hashes[`public/models/${name}`];
+    if (fs.existsSync(target) && sha256(target) === expected) {
+      console.log(`[models] ${name} verified.`);
       continue;
     }
     console.log(`[models] Downloading ${name}...`);
     await download(url, target);
+    if (sha256(target) !== expected) {
+      fs.unlinkSync(target);
+      throw new Error(`${name} failed its SHA-256 integrity check.`);
+    }
   }
   console.log('[models] MediaPipe models ready.');
 })().catch((error) => {

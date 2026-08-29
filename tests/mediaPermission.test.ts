@@ -1,27 +1,25 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { acquireCameraThenMicrophone } from '../src/media/acquireMedia';
-
-class FakeStream {
-  constructor(private tracks: Array<{ kind: string }> = []) {}
-  getVideoTracks() { return this.tracks.filter((track) => track.kind === 'video'); }
-  getAudioTracks() { return this.tracks.filter((track) => track.kind === 'audio'); }
-}
+import { acquireRequiredMedia } from '../src/media/acquireMedia';
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe('media permission fallback', () => {
-  it('keeps camera video when microphone permission is denied', async () => {
+describe('required call media', () => {
+  it('requests camera and microphone as one required path', async () => {
     vi.stubGlobal('window', { isSecureContext: true });
-    vi.stubGlobal('MediaStream', FakeStream);
-    const camera = new FakeStream([{ kind: 'video' }]);
-    const getUserMedia = vi.fn()
-      .mockResolvedValueOnce(camera)
-      .mockRejectedValueOnce(new DOMException('denied', 'NotAllowedError'));
-    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } });
-    const result = await acquireCameraThenMicrophone({ getUserMedia } as unknown as MediaDevices);
-    expect(getUserMedia).toHaveBeenCalledTimes(2);
-    expect(result.stream.getVideoTracks()).toHaveLength(1);
-    expect(result.stream.getAudioTracks()).toHaveLength(0);
-    expect(result.microphoneError).toContain('Microphone access is blocked');
+    const stream = { getTracks: () => [] } as unknown as MediaStream;
+    const getUserMedia = vi.fn().mockResolvedValue(stream);
+    const result = await acquireRequiredMedia({ getUserMedia } as unknown as MediaDevices);
+    expect(result).toBe(stream);
+    expect(getUserMedia).toHaveBeenCalledWith(expect.objectContaining({
+      video: expect.any(Object),
+      audio: expect.any(Object),
+    }));
+  });
+
+  it('fails setup when a required device is denied', async () => {
+    vi.stubGlobal('window', { isSecureContext: true });
+    const denied = new DOMException('denied', 'NotAllowedError');
+    const getUserMedia = vi.fn().mockRejectedValue(denied);
+    await expect(acquireRequiredMedia({ getUserMedia } as unknown as MediaDevices)).rejects.toBe(denied);
   });
 });

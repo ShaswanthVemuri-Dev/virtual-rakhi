@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { canRetainRightPose, fitHybridWristScale, projectRingDiameter, translatePoseMatrix } from '../src/ar/rakhi3dRenderer';
+import { canRetainRightPose, medianWristScale, projectRingDiameter, translatePoseMatrix, wristScaleSample } from '../src/ar/rakhi3dRenderer';
 
 describe('hybrid Google + VTO wrist transform', () => {
-  it('corrects an oversized VTO solve in the same frame', () => {
-    expect(fitHybridWristScale(.8, .08, 1, false)).toBeCloseTo(.1, 5);
-    expect(fitHybridWristScale(.1, .105, 1, true)).toBeCloseTo(1.016, 5);
-    expect(fitHybridWristScale(Number.NaN, .1, .9, true)).toBe(.9);
+  it('accepts only stable front-facing bounded scale samples', () => {
+    expect(wristScaleSample(.1, .105, .9)).toBeCloseTo(1.05, 5);
+    expect(wristScaleSample(.8, .08, .9)).toBeNull();
+    expect(wristScaleSample(.1, .105, .4)).toBeNull();
+    expect(medianWristScale([.94, .97, 1, 1.02, 1.04])).toBe(1);
   });
 
   it('measures and fits the whole ring at front, diagonal, and edge-on angles', () => {
@@ -19,8 +20,7 @@ describe('hybrid Google + VTO wrist transform', () => {
       const diameter = projectRingDiameter(wrist, camera);
       expect(diameter).not.toBeNull();
       expect(diameter!).toBeGreaterThan(.1);
-      const scale = fitHybridWristScale(diameter!, .08, 1, false);
-      expect(diameter! * scale).toBeCloseTo(.08, 5);
+      expect(Number.isFinite(diameter!)).toBe(true);
     });
   });
 

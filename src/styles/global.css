@@ -1,7 +1,5 @@
-@import url('https://fonts.googleapis.com/css2?family=Laila:wght@300;400;500;600;700&display=swap');
-
 :root {
-  font-family: 'Laila', serif;
+  font-family: Georgia, 'Times New Roman', serif;
   color: #4b251d;
   background: #f8f1e7;
   font-synthesis: none;
@@ -43,9 +41,8 @@ h2 { margin: 8px 0 12px; font-size: clamp(28px, 4vw, 42px); }
 .join-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
 .join-row input { width: 100%; min-height: 50px; border: 1px solid var(--line); border-radius: 12px; background: #fff; color: var(--ink); padding: 0 16px; text-transform: uppercase; letter-spacing: .13em; font-weight: 500; }
 .lobby-copy small { display: block; margin-top: 17px; color: var(--muted); line-height: 1.5; }
-.error-banner, .warning-banner { margin: 12px 0; padding: 11px 13px; border-radius: 11px; line-height: 1.5; font-size: 13px; animation: surface-enter .28s ease-out both; }
+.error-banner { margin: 12px 0; padding: 11px 13px; border-radius: 11px; line-height: 1.5; font-size: 13px; animation: surface-enter .28s ease-out both; }
 .error-banner { color: #7c211e; background: #f9ded8; border: 1px solid #e9aaa1; }
-.warning-banner { color: #70431d; background: #faecd4; border: 1px solid #e8c68f; }
 .waiting-room { text-align: center; }
 .waiting-room h2 { color: var(--red); font-size: clamp(40px, 10vw, 64px); letter-spacing: .16em; }
 .waiting-room > button { margin: 5px; }
@@ -101,14 +98,15 @@ h2 { margin: 8px 0 12px; font-size: clamp(28px, 4vw, 42px); }
 .self-pip { position: absolute; z-index: 5; right: 14px; bottom: 14px; width: min(24%, 200px); overflow: hidden; aspect-ratio: 16/9; border: 2px solid #fff; border-radius: 12px; background: #211; box-shadow: 0 12px 32px rgba(0,0,0,.25); transition: width .34s ease, height .34s ease, inset .34s ease, border-radius .34s ease, opacity .24s ease; }
 .self-pip video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
 .pip-hand-canvas { position: absolute; z-index: 1; inset: 0; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
-.self-pip span { position: absolute; z-index: 2; left: 6px; bottom: 5px; padding: 2px 5px; border-radius: 4px; color: #fff; background: rgba(0,0,0,.55); font-size: 8px; }
+.self-pip span { position: absolute; z-index: 2; left: 6px; bottom: 5px; padding: 2px 5px; border-radius: 4px; color: #fff; background: rgba(0,0,0,.55); font-size: 10px; }
 .local-focus > video { z-index: 5; inset: auto 14px 14px auto; width: min(24%, 200px); height: auto; aspect-ratio: 16/9; border: 2px solid #fff; border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,.25); }
 .local-focus .self-pip { z-index: 1; inset: 0; width: 100%; height: 100%; aspect-ratio: auto; border: 0; border-radius: 0; box-shadow: none; }
 .local-focus .self-pip span { display: none; }
 .local-focus > video, .local-focus .self-pip { animation: local-view-crossfade .36s ease-out both; }
 .remote-focus > video, .remote-focus .self-pip { animation: remote-view-crossfade .36s ease-out both; }
-.camera-placeholder { position: absolute; inset: 0; display: grid; place-content: center; gap: 5px; text-align: center; color: #fff; animation: fade-in .25s ease-out both; }
+.camera-placeholder { position: absolute; z-index: 7; inset: 0; display: grid; place-content: center; gap: 5px; text-align: center; color: #fff; background: #241713; animation: fade-in .25s ease-out both; }
 .camera-placeholder span { font-size: 12px; opacity: .72; }
+.remote-muted { position: absolute; z-index: 8; top: 12px; left: 12px; padding: 6px 9px; border-radius: 8px; color: #fff; background: rgba(31,18,15,.76); font-size: 11px; }
 .ceremony-controls { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; padding: 12px; border-top: 1px solid var(--line); }
 .ceremony-controls button { min-height: 46px; }
 .ceremony-controls .blessing-button { background: var(--ink); border-color: var(--ink); }
@@ -133,8 +131,8 @@ h2 { margin: 8px 0 12px; font-size: clamp(28px, 4vw, 42px); }
 .wrist-pose-guide > em { color: var(--red); font-size: 10px; font-style: normal; }
 .wrist-pose-image { display: block; width: 100%; max-height: 154px; margin: 10px auto 5px; object-fit: contain; filter: drop-shadow(0 8px 10px rgba(75,37,29,.12)); }
 .pose-labels { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 7px; margin: 0 0 8px; color: var(--muted); text-align: center; }
-.pose-labels small { font-size: 9px; }
-.pose-labels span { font-size: 8px; }
+.pose-labels small { font-size: 10px; }
+.pose-labels span { font-size: 10px; }
 .guide-hand { display: none; }
 .blessing-layer { position: absolute; inset: 0; z-index: 7; overflow: hidden; pointer-events: none; }
 .blessing-layer.split-blessing { right: auto; width: 50%; }
@@ -164,13 +162,18 @@ h2 { margin: 8px 0 12px; font-size: clamp(28px, 4vw, 42px); }
   .session-bar > div:first-child > strong, .connection-chip { display: none; }
   .session-actions { flex-wrap: wrap; justify-content: flex-end; }
 }
-@media (max-width: 760px) {
+@media (max-width: 820px) {
   body { overflow: auto; }
   .app-shell { height: auto; min-height: 100dvh; overflow: visible; }
   .ceremony-session { min-height: calc(100dvh - 110px); }
   .ceremony-grid { grid-template-columns: 1fr; }
   .ceremony-side { overflow: visible; }
   .video-stage { min-height: 320px; aspect-ratio: 16/9; }
+}
+@media (max-height: 700px) {
+  body { overflow: auto; }
+  .app-shell { height: auto; min-height: 100dvh; overflow: visible; }
+  .ceremony-side { overflow: visible; }
 }
 @media (max-width: 680px) {
   .app-header { padding-bottom: 10px; }

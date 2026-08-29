@@ -14,8 +14,8 @@ export class TilakHandRenderer {
     const height = ctx.canvas.height;
     const targetX = (mirrored ? 1 - anchor.x : anchor.x) * width;
     const targetY = anchor.y * height;
-    const markHeight = Math.max(30, anchor.scale * width * 1.65);
-    const length = Math.min(height * .2, Math.max(76, anchor.scale * width * 3.1));
+    const markHeight = Math.max(30, anchor.scale * height * 1.65);
+    const length = Math.min(height * .2, Math.max(76, anchor.scale * height * 3.1));
 
     let tipX = targetX;
     let tipY = targetY + markHeight * .3;

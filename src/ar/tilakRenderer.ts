@@ -15,7 +15,7 @@ export class TilakRenderer {
     const x = (mirrored ? 1 - anchor.x : anchor.x) * ctx.canvas.width;
     const y = anchor.y * ctx.canvas.height;
     const rotation = (mirrored ? -anchor.rotation : anchor.rotation) + Math.PI;
-    const width = Math.max(18, anchor.scale * ctx.canvas.width);
+    const width = Math.max(18, anchor.scale * ctx.canvas.height);
     const height = width * 1.65;
     ctx.save();
     ctx.globalAlpha = alpha;

@@ -6,6 +6,7 @@ interface Props {
   tilakApplied: boolean;
   rakhiAttached: boolean;
   aartiComplete: boolean;
+  rakhiReady: boolean;
   disabled?: boolean;
   onAarti: () => void;
   onTilak: () => void;
@@ -21,7 +22,7 @@ export default function CeremonyControls(props: Props) {
         <>
           <button disabled={busy || props.aartiComplete} onClick={props.onAarti}>{props.aartiComplete ? 'Aarti ✓' : 'Aarti'}</button>
           <button disabled={busy || !props.aartiComplete || props.tilakApplied} onClick={props.onTilak}>{props.tilakApplied ? 'Tilak ✓' : 'Tilak'}</button>
-          <button disabled={busy || !props.tilakApplied || props.rakhiAttached} onClick={props.onRakhi}>{props.rakhiAttached ? 'Rakhi ✓' : 'Rakhi'}</button>
+          <button disabled={busy || !props.tilakApplied || !props.rakhiReady || props.rakhiAttached} onClick={props.onRakhi}>{props.rakhiAttached ? 'Rakhi ✓' : 'Rakhi'}</button>
         </>
       )}
       <button className="blessing-button" disabled={busy || !props.rakhiAttached} onClick={props.onBlessing}>Blessing</button>

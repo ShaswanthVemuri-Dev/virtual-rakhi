@@ -20,21 +20,21 @@ const rotateX = (angle: number) => (point: Vec3): Vec3 => ({
 });
 
 describe('right wrist surface pose', () => {
-  it('keeps close-range hand tracking when the full-body pose disappears', () => {
+  it('requires an anatomical right-side association before close-range retention', () => {
     const closeHand = hand((point) => ({ x: point.x + .72, y: point.y + .42, z: point.z }));
-    expect(chooseRightHandIndex([closeHand], null, null)).toBe(0);
+    expect(chooseRightHandIndex([closeHand], null, null)).toBe(-1);
+    expect(chooseRightHandIndex([closeHand], { x: .72, y: .47, z: 0 }, null)).toBe(0);
     const otherHand = hand((point) => ({ x: point.x + .2, y: point.y + .42, z: point.z }));
     expect(chooseRightHandIndex([otherHand, closeHand], null, { x: .72, y: .47, z: 0 })).toBe(1);
   });
 
   it('uses landmark translation while preserving the VTO screen rotation', () => {
-    const position = { x: .62, y: .41, scale: .2, angle: 0, confidence: .8, forearmDirection: { x: 0, y: -1 }, palmNormal: { x: 0, y: 0, z: -1 } };
+    const position = { x: .62, y: .41, scale: .2, angle: 0, confidence: .8, forearmDirection: { x: 0, y: -1 } };
     const rotation = { x: .2, y: .3, scale: .12, angle: 1.2, confidence: .9, forearmDirection: { x: 1, y: 0 } };
     const fused = fuseWristAnchors(position, rotation);
     expect(fused?.x).toBe(.62);
     expect(fused?.scale).toBe(.2);
     expect(fused?.angle).toBe(1.2);
-    expect(fused?.palmNormal?.z).toBe(-1);
   });
 
   it('does not declare the wrist ready until both trackers agree', () => {
